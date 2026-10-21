@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RNS Hub (dev)</title>
+<!--
+  RNS Hub R1-Lite — sign-in and bare owner screen (R1L-02, R1L-15 part). DEVELOPMENT ONLY: test data only (CP-1).
+  Talks to Supabase through the publishable (public) key; every read is limited by row-level security and every
+  write goes through the server functions in the app schema. Nothing secret lives in this file.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.min.js"></script>
+<style>
+  :root { --orange:#e8650f; --orange-dark:#c4530a; --ink:#1f2328; --muted:#6b7280; --line:#e5e7eb; --bg:#fafaf9; --card:#fff; --ok:#15803d; --bad:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:#fff; border-bottom:3px solid var(--orange); padding:12px 20px; display:flex; align-items:center; justify-content:space-between; }
+  header h1 { font-size:18px; margin:0; } header h1 span { color:var(--orange); }
+  header .who { font-size:13px; color:var(--muted); }
+  main { max-width:960px; margin:24px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:17px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select, textarea { width:100%; padding:9px 10px; border:1px solid #cfd4da; border-radius:8px; font:inherit; }
+  button { background:var(--orange); color:#fff; border:0; border-radius:8px; padding:9px 14px; font:inherit; font-weight:600; cursor:pointer; margin-top:12px; }
+  button:hover { background:var(--orange-dark); } button.secondary { background:#fff; color:var(--ink); border:1px solid #cfd4da; } button.small { padding:5px 10px; font-size:13px; margin:0; }
+  button:disabled { opacity:.5; cursor:default; }
+  .msg { margin-top:10px; font-size:14px; } .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+  .tabs button { margin:0; background:#fff; color:var(--ink); border:1px solid #cfd4da; } .tabs button.active { background:var(--orange); color:#fff; border-color:var(--orange); }
+  table { width:100%; border-collapse:collapse; font-size:14px; } th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  code { font-size:12px; background:#f3f4f6; padding:1px 4px; border-radius:4px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; background:#f3f4f6; }
+  .pill.active { background:#dcfce7; color:#166534; } .pill.invited { background:#fef3c7; color:#92400e; } .pill.suspended,.pill.removed,.pill.failed { background:#fee2e2; color:#991b1b; }
+  .hidden { display:none; } .row { display:flex; gap:12px; } .row > * { flex:1; }
+  .banner { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; border-radius:8px; padding:8px 12px; font-size:13px; margin-bottom:16px; }
+  .qr svg, .qr img { width:200px; height:200px; display:block; margin:8px 0; }
+  pre { white-space:pre-wrap; font-size:12px; background:#f3f4f6; padding:8px; border-radius:6px; max-height:140px; overflow:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>RNS</span> Hub <small style="font-weight:400;color:var(--muted)">R1-Lite · development</small></h1>
+  <div class="who" id="who"></div>
+</header>
+<main>
+  <div class="banner">Development environment — test data only. Nothing here is a real customer, job or payment.</div>
+
+  <!-- Signed out -->
+  <section id="s-signin" class="card hidden">
+    <h2>Sign in</h2>
+    <label>Email</label><input id="si-email" type="email" autocomplete="username">
+    <label>Password</label><input id="si-pass" type="password" autocomplete="current-password">
+    <button id="si-go">Sign in</button>
+    <button class="secondary" id="si-google">Sign in with Google</button>
+    <button class="secondary" id="si-signup">Create my login</button>
+    <button class="secondary" id="si-forgot">Forgot password</button>
+    <div class="msg" id="si-msg"></div>
+    <p class="msg ok invite-hint hidden">You opened an invitation link. Create your login with the invited email (or sign in if you already have one) and the invitation will be accepted automatically.</p>
+    <p style="font-size:13px;color:var(--muted)">Team members join only through an invitation link from the owner. "Create my login" is for the owner's first sign-in and for invited people who have not signed in yet.</p>
+  </section>
+
+  <!-- Customer quote page (no account; single-use link) -->
+  <section id="s-quote" class="card hidden">
+    <div id="cq-body"></div>
+  </section>
+
+  <!-- Password recovery (opened from the emailed recovery link) -->
+  <section id="s-recover" class="card hidden">
+    <div id="rc-step1">
+      <h2>Reset your password</h2>
+      <p>We emailed a reset message to <span id="rc-email"></span>. Click the link in that email; it will open a page that says "can't be reached" — that's expected. <strong>Copy the whole address from that page's address bar and paste it here.</strong> (Pasting the link itself from the email also works.) It expires in about an hour.</p>
+      <label>Paste the reset link (or code)</label><input id="rc-code">
+      <button id="rc-verify">Continue</button>
+      <button class="secondary" id="rc-back">Back to sign in</button>
+      <div class="msg" id="rc-msg1"></div>
+    </div>
+    <div id="rc-step2" class="hidden">
+    <h2>Set a new password</h2>
+    <label>New password (at least 12 characters)</label><input id="rc-pass" type="password" autocomplete="new-password">
+    <label>Repeat it</label><input id="rc-pass2" type="password" autocomplete="new-password">
+    <button id="rc-go">Save new password</button>
+    <div class="msg" id="rc-msg"></div>
+    </div>
+  </section>
+
+  <!-- Owner claim -->
+  <section id="s-claim" class="card hidden">
+    <h2>Welcome, owner</h2>
+    <p>This login's email matches the owner record created for this Hub. Claim it to continue.</p>
+    <button id="claim-go">Claim the owner account</button>
+    <div class="msg" id="claim-msg"></div>
+  </section>
+
+  <!-- Not a member -->
+  <section id="s-nomember" class="card hidden">
+    <h2>No Hub access</h2>
+    <p>This login is not a Hub member. Ask the owner for an invitation, then sign in with the invited email.</p>
+    <button class="secondary" data-signout>Sign out</button>
+  </section>
+
+  <!-- MFA enrol -->
+  <section id="s-enrol" class="card hidden">
+    <h2>Set up your authenticator</h2>
+    <p>Owner sign-in requires a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…). Scan this code with the app, then enter the 6-digit number it shows.</p>
+    <div class="qr" id="enrol-qr"></div>
+    <p style="font-size:12px;color:var(--muted)">Can't scan? Enter this key by hand: <code id="enrol-secret"></code></p>
+    <label>6-digit code</label><input id="enrol-code" inputmode="numeric" maxlength="6">
+    <button id="enrol-go">Verify and finish setup</button>
+    <div class="msg" id="enrol-msg"></div>
+  </section>
+
+  <!-- MFA challenge -->
+  <section id="s-mfa" class="card hidden">
+    <h2>Authenticator code</h2>
+    <label>Enter the 6-digit code from your authenticator app</label><input id="mfa-code" inputmode="numeric" maxlength="6" autofocus>
+    <button id="mfa-go">Continue</button>
+    <button class="secondary" data-signout>Sign out</button>
+    <div class="msg" id="mfa-msg"></div>
+  </section>
+
+  <!-- Owner screen -->
+  <section id="s-owner" class="hidden">
+    <div class="tabs">
+      <button data-tab="leads" class="active">Leads</button>
+      <button data-tab="customers">Customers</button>
+      <button data-tab="quotes">Quotes</button>
+      <button data-tab="pricebook" data-owner>Price book</button>
+      <button data-tab="members" data-owner>Members</button>
+      <button data-tab="invitations" data-owner>Invitations</button>
+      <button data-tab="outbox" data-owner>Notices</button>
+      <button data-tab="audit" data-owner>Audit log</button>
+      <button data-tab="settings" data-owner>Settings</button>
+      <button data-tab="mail" data-owner>Mail log (dev)</button>
+      <button data-tab="health" data-owner>Health</button>
+      <button data-signout class="secondary" style="margin-left:auto">Sign out</button>
+    </div>
+
+
+    <div class="card" id="tab-leads">
+      <h2>Leads <small style="font-weight:400;color:var(--muted)">(manual entry only in R1-Lite; a customer exists only once a lead qualifies)</small></h2>
+      <div id="lead-pending" data-owner></div>
+      <table><thead><tr><th>Name</th><th>Source</th><th>Need</th><th>Status</th><th>Owner</th><th>Follow-up</th><th></th></tr></thead><tbody id="leads-body"></tbody></table>
+      <div id="lead-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:20px">Add a lead</h2>
+      <div class="row">
+        <div><label>Source</label><select id="ld-source"><option value="phone">Phone call</option><option value="email">Email</option><option value="walk_in">Walk-in / in person</option><option value="referral">Referral</option><option value="website">Website (re-entered from the current Hub)</option><option value="facebook">Facebook (re-entered)</option><option value="other">Other</option><option value="terry_call" data-owner>Terry's own call</option></select></div>
+        <div><label>Contact name</label><input id="ld-name"></div>
+        <div><label>Town</label><input id="ld-town"></div>
+      </div>
+      <div class="row">
+        <div><label>Phone</label><input id="ld-phone"></div>
+        <div><label>Email</label><input id="ld-email" type="email"></div>
+        <div><label>Originally claimed in the current Hub on (optional)</label><input id="ld-claimed" type="datetime-local"></div>
+      </div>
+      <label>What they need</label><input id="ld-need">
+      <label>Details</label><textarea id="ld-details" rows="2"></textarea>
+      <label>Original message, as received (kept verbatim)</label><textarea id="ld-orig" rows="2"></textarea>
+      <button id="ld-go">Add lead</button>
+      <div class="msg" id="ld-msg"></div>
+    </div>
+
+    <div class="card hidden" id="tab-customers">
+      <h2>Customers</h2>
+      <div id="cust-owner" data-owner></div>
+      <table><thead><tr><th>Name</th><th>Kind</th><th>Rep</th><th>Square</th><th>Status</th><th></th></tr></thead><tbody id="cust-body"></tbody></table>
+      <div id="cust-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+    </div>
+
+
+    <div class="card hidden" id="tab-quotes">
+      <h2>Quotes <small style="font-weight:400;color:var(--muted)">(a quote starts from a qualified customer; reps send only what passes the rule check or Terry approved)</small></h2>
+      <div id="quote-pending" data-owner></div>
+      <div class="row">
+        <div><label>New quote for customer</label><select id="qn-cust"></select></div>
+        <div><label>Location</label><select id="qn-loc"></select></div>
+        <div><label>Kind</label><select id="qn-kind"><option value="install">Install</option><option value="service">Service</option><option value="recurring">Recurring service</option></select></div>
+      </div>
+      <button class="small" id="qn-go">Start quote</button> <span class="msg" id="qn-msg"></span>
+      <table style="margin-top:12px"><thead><tr><th>Number</th><th>Customer</th><th>Rev</th><th>Status</th><th>Total</th><th>Rep</th><th></th></tr></thead><tbody id="quotes-body"></tbody></table>
+      <div id="quote-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:20px">Jobs <small style="font-weight:400;color:var(--muted)">(the handoff record an accepted quote opens; deposit invoice and scheduling arrive in P4/P5)</small></h2>
+      <table><thead><tr><th>Customer</th><th>Quote</th><th>Status</th><th>Rep</th><th>Opened</th><th></th></tr></thead><tbody id="jobs-body"></tbody></table>
+    </div>
+
+    <div class="card hidden" id="tab-pricebook">
+      <h2>Price book <small style="font-weight:400;color:var(--muted)">(from the Square catalog once the sandbox is connected; hand-entered items are a development stand-in)</small></h2>
+      <table><thead><tr><th>Item</th><th>SKU</th><th>Source</th><th>Price</th><th>Class</th><th>Cost (owner only)</th><th></th></tr></thead><tbody id="pb-body"></tbody></table>
+      <h2 style="margin-top:16px">Add a hand-entered item</h2>
+      <div class="row">
+        <div><label>Name</label><input id="pb-name"></div>
+        <div><label>Price ($)</label><input id="pb-price" type="number" step="0.01"></div>
+        <div><label>Class</label><select id="pb-class"><option value="equipment">equipment</option><option value="labor">labor</option><option value="materials">materials</option><option value="travel">travel</option><option value="recurring_service">recurring service</option></select></div>
+      </div>
+      <button class="small" id="pb-go">Add item</button> <span class="msg" id="pb-msg"></span>
+      <h2 style="margin-top:16px">Bundles</h2>
+      <div id="pb-bundles"></div>
+      <p style="font-size:13px;color:var(--muted)">Cost inputs live under Settings: <code>internal_labor_cost_cents_per_person_hour</code>, <code>warranty_allowance_pct</code> (RC-6), <code>mileage_rate_cents</code> (RC-5), <code>commission_rate_pct_default</code>. Until they are set the margin is "incomplete" and every quote goes to you.</p>
+    </div>
+
+    <div class="card hidden" id="tab-members">
+      <h2>Members</h2>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th></th></tr></thead><tbody id="members-body"></tbody></table>
+      <h2 style="margin-top:20px">Invite a sales rep</h2>
+      <div class="row">
+        <div><label>Name</label><input id="inv-name"></div>
+        <div><label>Email</label><input id="inv-email" type="email"></div>
+        <div><label>Role</label><select id="inv-role"><option value="sales_rep">Sales rep</option><option value="owner">Owner</option></select></div>
+      </div>
+      <label>Reason (recorded in the audit log)</label><input id="inv-reason" placeholder="e.g. new part-time sales rep">
+      <button id="inv-go">Send invitation</button>
+      <div class="msg" id="inv-msg"></div>
+      <p style="font-size:13px;color:var(--muted)">The link is valid 72 hours, single use, and bound to that email. In development the worker writes the email to the Mail log tab instead of sending it (log-only mode); copy the link from there to test acceptance.</p>
+    </div>
+
+    <div class="card hidden" id="tab-invitations">
+      <h2>Invitations</h2>
+      <table><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th></th></tr></thead><tbody id="inv-body"></tbody></table>
+    </div>
+
+    <div class="card hidden" id="tab-outbox">
+      <h2>Notices (outbox watch list)</h2>
+      <table><thead><tr><th>#</th><th>Event</th><th>To</th><th>Status</th><th>Not before</th><th>Attempts</th><th>Error</th></tr></thead><tbody id="outbox-body"></tbody></table>
+    </div>
+
+    <div class="card hidden" id="tab-audit">
+      <h2>Audit log <small style="font-weight:400;color:var(--muted)">(newest first; reading it is itself logged)</small></h2>
+      <button class="small secondary" id="audit-verify">Verify chain &amp; anchors</button> <span class="msg" id="audit-msg"></span>
+      <table style="margin-top:10px"><thead><tr><th>#</th><th>When (ET)</th><th>Action</th><th>Entity</th><th>Details</th></tr></thead><tbody id="audit-body"></tbody></table>
+      <button class="small secondary" id="audit-more">Load older</button>
+    </div>
+
+    <div class="card hidden" id="tab-mail">
+      <h2>Worker</h2>
+      <table><thead><tr><th>Job</th><th>Last run (ET)</th><th>Runs</th><th>Last result</th></tr></thead><tbody id="hb-body"></tbody></table>
+      <h2 style="margin-top:20px">Mail log <small style="font-weight:400;color:var(--muted)">(log-only mode: nothing is sent; this is what would have gone out)</small></h2>
+      <table><thead><tr><th>#</th><th>When (ET)</th><th>Event</th><th>To</th><th>Subject</th><th></th></tr></thead><tbody id="mail-body"></tbody></table>
+      <div id="mail-view" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:20px">Template preview</h2>
+      <div class="row"><div><label>Event</label><select id="prev-event"></select></div></div>
+      <button class="small secondary" id="prev-go">Preview</button>
+      <div id="prev-view" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+    </div>
+
+    <div class="card hidden" id="tab-health">
+      <h2>Health <small style="font-weight:400;color:var(--muted)">(checked every 15 minutes by the monitor job; alerts go to you through the notice queue)</small></h2>
+      <div id="health-summary"></div>
+      <h2 style="margin-top:20px">Latest measurements</h2>
+      <table><thead><tr><th>Metric</th><th>Value</th><th>Limit</th></tr></thead><tbody id="health-body"></tbody></table>
+      <h2 style="margin-top:20px">Backups</h2>
+      <div id="backup-summary"></div>
+      <h2 style="margin-top:20px">Recent checks</h2>
+      <table><thead><tr><th>When (ET)</th><th>Alerts</th><th>DB size</th><th>Queued</th></tr></thead><tbody id="snap-body"></tbody></table>
+      <p style="font-size:13px;color:var(--muted)">Budget: set <code>budget_monthly_usd</code> and <code>spend_month_to_date_usd</code> under Settings to arm the budget alert. On the Free plan spend is 0 and the plan itself is the hard limit.</p>
+    </div>
+
+    <div class="card hidden" id="tab-settings">
+      <h2>Settings</h2>
+      <table><thead><tr><th>Key</th><th>Value</th><th>Updated</th></tr></thead><tbody id="settings-body"></tbody></table>
+      <div class="row">
+        <div><label>Key</label><select id="set-key"><option>owner_email</option><option>dedicated_inbox_email</option><option>business_hours</option><option>email_mode</option><option>hub_url</option><option>budget_monthly_usd</option><option>spend_month_to_date_usd</option><option>square_mode</option><option>internal_labor_cost_cents_per_person_hour</option><option>warranty_allowance_pct</option><option>mileage_rate_cents</option><option>commission_rate_pct_default</option><option>processing_fee_pct</option><option>margin_min_pct</option></select></div>
+        <div><label>Value (JSON: "text" in quotes, or null)</label><input id="set-value" placeholder='"owner@example.com"'></div>
+      </div>
+      <label>Reason</label><input id="set-reason">
+      <button id="set-go">Save setting</button>
+      <div class="msg" id="set-msg"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const SUPABASE_URL = 'https://ukhxlzwvqdkberucofin.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_XMAexZZfPu4m1KaDrCw8tQ_BX1iwWBx';  // publishable key: public by design
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'app' } });
+const $ = id => document.getElementById(id);
+const show = id => { document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden')); $(id).classList.remove('hidden'); };
+const msg = (id, text, ok) => { const e = $(id); e.textContent = text || ''; e.className = 'msg ' + (ok ? 'ok' : 'bad'); };
+const rpc = async (fn, args) => { const { data, error } = await sb.rpc(fn, args || {}); if (error) throw new Error(error.message); return data; };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const et = ts => ts ? new Date(ts).toLocaleString('en-US', { timeZone: 'America/New_York' }) : '';
+const client = () => ({ ua: navigator.userAgent.slice(0, 120), page: location.pathname });
+let pendingInvite = (location.hash.match(/^#invite=([A-Za-z0-9_\-]+)$/) || [])[1] || null;
+if (pendingInvite) document.querySelectorAll('.invite-hint').forEach(e => e.classList.remove('hidden'));
+
+const quoteToken = (location.hash.match(/^#quote=([A-Za-z0-9_\-]+)$/) || [])[1] || null;
+let recovering = /type=recovery/.test(location.hash);
+async function route() {
+  if (quoteToken) return customerQuote(quoteToken);
+  if (recovering) { show('s-recover'); $('rc-step1').classList.add('hidden'); $('rc-step2').classList.remove('hidden'); return; }
+  const { data: { session } } = await sb.auth.getSession();
+  $('who').textContent = session ? session.user.email : '';
+  if (!session) return show('s-signin');
+  let me;
+  try { me = await rpc('whoami'); } catch (e) { msg('si-msg', 'Hub not reachable: ' + e.message); return show('s-signin'); }
+  if (!me.member && pendingInvite) {
+    const tok = pendingInvite; pendingInvite = null; history.replaceState(null, '', location.pathname);
+    try { const r = await rpc('invitation_accept', { p_token: tok, p_client: client() }); if (!r.ok) msg('si-msg', 'Invitation: ' + r.reason); }
+    catch (e) { msg('si-msg', 'Invitation: ' + e.message); }
+    return route();
+  }
+  if (!me.member) return show(me.can_claim_owner ? 's-claim' : 's-nomember');
+  if (me.member.status !== 'active') return show('s-nomember');
+  if (me.mfa_required && !me.recognised) {
+    const { data: factors } = await sb.auth.mfa.listFactors();
+    const verified = (factors?.totp || []).find(f => f.status === 'verified');
+    if (!verified) return startEnrol();
+    window.__factorId = verified.id;
+    return show('s-mfa');
+  }
+  if (me.is_owner || (me.member.roles || []).includes('sales_rep')) {
+    window.__me = me;
+    document.querySelectorAll('[data-owner]').forEach(e => e.classList.toggle('hidden', !me.is_owner));
+    show('s-owner'); return loadTab(currentTab);
+  }
+  show('s-nomember');
+}
+
+// ----- customer quote page (R1L-32): no account, single-use link -----
+async function customerQuote(tok) {
+  show('s-quote'); $('who').textContent = '';
+  const r = await rpc('quote_open', { p_token: tok, p_client: client() });
+  if (!r.ok) { $('cq-body').innerHTML = `<h2>This link is not valid</h2><p>${esc(r.reason)}. If you still need the quote, please contact Reichman's Networking Solutions at (330) 390-4023 or rns.info.sales@gmail.com and we will send a fresh link.</p>`; return; }
+  const d = r.document;
+  $('cq-body').innerHTML = `<h2>Quote ${esc(d.quote_number)} <small style="font-weight:400;color:var(--muted)">revision ${d.revision}</small></h2>
+    <p><strong>${esc(d.customer)}</strong><br>${esc(d.location?.label || '')}: ${esc(d.location?.address_line1 || '')}, ${esc(d.location?.city || '')} ${esc(d.location?.state || '')} ${esc(d.location?.postal_code || '')}</p>
+    ${d.scope_summary ? `<p>${esc(d.scope_summary)}</p>` : ''}
+    <table><thead><tr><th>Item</th><th>Type</th><th>Qty</th><th>Unit</th><th>Amount</th></tr></thead><tbody>${d.lines.map(l => `<tr><td>${esc(l.description)}</td><td>${esc((l.classification || '').replace('_', ' '))}</td><td>${l.qty}</td><td>${money(l.unit_price_cents)}</td><td>${money(l.amount_cents)}</td></tr>`).join('')}</tbody></table>
+    <p style="font-size:17px"><strong>Total ${money(d.subtotal_cents)}</strong> <small>· tax: ${esc(d.tax)}</small><br>
+      <strong>Deposit due on acceptance: ${money(d.deposit_cents)}</strong> <small>(${esc(d.deposit_rule)})</small><br>
+      Balance after deposit: ${money(d.balance_after_deposit_cents)} <small>(before tax)</small></p>
+    <p style="font-size:13px;color:var(--muted)">${esc(d.actual_hours_statement)} This quote is valid until ${et(r.valid_until)}. ${d.notes ? 'Notes: ' + esc(d.notes) : ''}</p>
+    <h2>Accept this quote</h2>
+    <p style="font-size:13px">Type your name and the email address this quote was sent to (${esc(r.email_hint)}). Accepting records the date, time and this document's fingerprint. Payment is handled separately with a deposit invoice.</p>
+    <div class="row"><div><label>Your name</label><input id="cq-name" autocomplete="name"></div><div><label>Email the quote was sent to</label><input id="cq-email" type="email" autocomplete="email"></div></div>
+    <button id="cq-accept">I accept quote ${esc(d.quote_number)}</button>
+    <div class="msg" id="cq-msg"></div>
+    <p style="font-size:12px;color:var(--muted)">Terms: ${esc(r.terms_version)}. This link works once and expires ${et(r.link_expires_at)}.</p>`;
+  $('cq-accept').onclick = async () => {
+    msg('cq-msg', '');
+    const a = await rpc('quote_accept', { p_token: tok, p_typed_name: $('cq-name').value.trim(), p_typed_email: $('cq-email').value.trim(), p_fingerprint: r.fingerprint, p_client: client() });
+    if (!a.ok) return msg('cq-msg', a.reason);
+    $('cq-body').innerHTML = `<h2>Thank you</h2><p>${esc(a.message)}</p><p>Quote ${esc(a.quote_number)} (revision ${a.revision}) accepted ${et(a.accepted_at)}. Deposit due: ${esc(a.deposit)}.</p>`;
+  };
+}
+
+// ----- sign in / sign up -----
+$('si-go').onclick = async () => {
+  msg('si-msg', '');
+  const { error } = await sb.auth.signInWithPassword({ email: $('si-email').value.trim(), password: $('si-pass').value });
+  if (error) return msg('si-msg', error.message);
+  try { await rpc('session_event', { p_event: 'signed_in', p_client: client() }); } catch (_) {}
+  route();
+};
+// Google sign-in (R1L-02 variant): Supabase's Google provider; the Google account's email must match the member's
+// email, which Supabase links to the same user automatically. The TOTP step for the owner still applies afterwards.
+// Only works from a real https address (not a local file), so the page tells the owner when it cannot work.
+$('si-google').onclick = async () => {
+  msg('si-msg', '');
+  if (location.protocol === 'file:') return msg('si-msg', 'Google sign-in needs the Hub opened from its web address, not a file on this computer.');
+  const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+  if (error) msg('si-msg', error.message);
+};
+$('si-signup').onclick = async () => {
+  msg('si-msg', '');
+  const email = $('si-email').value.trim(), password = $('si-pass').value;
+  if (password.length < 12) return msg('si-msg', 'Use a password of at least 12 characters.');
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) return msg('si-msg', error.message);
+  if (data.session) { route(); } else msg('si-msg', 'Check your email for the confirmation link, then come back and sign in.', true);
+};
+let recoverEmail = '';
+$('si-forgot').onclick = async () => {
+  msg('si-msg', '');
+  const email = $('si-email').value.trim(); if (!email) return msg('si-msg', 'Type your email first, then click Forgot password.');
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  if (error) return msg('si-msg', error.message);
+  recoverEmail = email; $('rc-email').textContent = email; $('rc-code').value = '';
+  show('s-recover'); $('rc-step1').classList.remove('hidden'); $('rc-step2').classList.add('hidden'); msg('rc-msg1', '');
+};
+$('rc-back').onclick = () => show('s-signin');
+$('rc-verify').onclick = async () => {
+  msg('rc-msg1', '');
+  const raw = $('rc-code').value.trim();
+  const m = raw.match(/[?&]token=([^&]+)/), at = raw.match(/[#&?]access_token=([^&]+)/), rt = raw.match(/[#&?]refresh_token=([^&]+)/);
+  const { error } = at && rt ? await sb.auth.setSession({ access_token: decodeURIComponent(at[1]), refresh_token: decodeURIComponent(rt[1]) })
+                  : m ? await sb.auth.verifyOtp({ token_hash: decodeURIComponent(m[1]), type: 'recovery' })
+                      : await sb.auth.verifyOtp({ email: recoverEmail, token: raw, type: 'recovery' });
+  if (error) return msg('rc-msg1', error.message + (m ? '' : ' — try pasting the whole link from the email instead.'));
+  recovering = true; $('rc-step1').classList.add('hidden'); $('rc-step2').classList.remove('hidden');
+};
+$('rc-go').onclick = async () => {
+  msg('rc-msg', '');
+  const p1 = $('rc-pass').value, p2 = $('rc-pass2').value;
+  if (p1.length < 12) return msg('rc-msg', 'Use at least 12 characters.');
+  if (p1 !== p2) return msg('rc-msg', 'The two entries do not match.');
+  const { error } = await sb.auth.updateUser({ password: p1 });
+  if (error) return msg('rc-msg', error.message);
+  recovering = false; history.replaceState(null, '', location.pathname);
+  try { await rpc('session_event', { p_event: 'password_reset', p_client: client() }); } catch (_) {}
+  msg('rc-msg', 'Saved. Taking you in…', true); setTimeout(route, 800);
+};
+document.querySelectorAll('[data-signout]').forEach(b => b.onclick = async () => {
+  try { await rpc('session_event', { p_event: 'signed_out', p_client: client() }); } catch (_) {}
+  await sb.auth.signOut({ scope: 'global' }); route();
+});
+
+// ----- owner claim -----
+$('claim-go').onclick = async () => {
+  try { const r = await rpc('owner_claim'); if (!r.ok) return msg('claim-msg', r.reason); route(); }
+  catch (e) { msg('claim-msg', e.message); }
+};
+
+// ----- MFA enrol / challenge -----
+async function startEnrol() {
+  show('s-enrol'); msg('enrol-msg', '');
+  const { data, error } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'RNS Hub owner' });
+  if (error) return msg('enrol-msg', error.message);
+  window.__factorId = data.id;
+  $('enrol-qr').innerHTML = data.totp.qr_code.startsWith('<svg') ? data.totp.qr_code : '<img src="' + data.totp.qr_code + '">';
+  $('enrol-secret').textContent = data.totp.secret;
+}
+$('enrol-go').onclick = async () => {
+  msg('enrol-msg', '');
+  const fid = window.__factorId;
+  const { data: ch, error: e1 } = await sb.auth.mfa.challenge({ factorId: fid });
+  if (e1) return msg('enrol-msg', e1.message);
+  const { error: e2 } = await sb.auth.mfa.verify({ factorId: fid, challengeId: ch.id, code: $('enrol-code').value.trim() });
+  if (e2) return msg('enrol-msg', e2.message);
+  try { await rpc('session_event', { p_event: 'mfa_enrolled', p_client: client() }); } catch (_) {}
+  route();
+};
+$('mfa-go').onclick = async () => {
+  msg('mfa-msg', '');
+  const fid = window.__factorId;
+  const { data: ch, error: e1 } = await sb.auth.mfa.challenge({ factorId: fid });
+  if (e1) return msg('mfa-msg', e1.message);
+  const { error: e2 } = await sb.auth.mfa.verify({ factorId: fid, challengeId: ch.id, code: $('mfa-code').value.trim() });
+  if (e2) return msg('mfa-msg', e2.message);
+  $('mfa-code').value = '';
+  try { await rpc('session_event', { p_event: 'mfa_verified', p_client: client() }); } catch (_) {}
+  route();
+};
+
+// ----- owner screen -----
+let currentTab = 'leads';
+document.querySelectorAll('.tabs [data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs [data-tab]').forEach(x => x.classList.toggle('active', x === b));
+  currentTab = b.dataset.tab; loadTab(currentTab);
+});
+async function loadTab(tab) {
+  ['leads','customers','quotes','pricebook','members','invitations','outbox','audit','settings','mail','health'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  if (tab === 'leads') return loadLeads();
+  if (tab === 'quotes') return loadQuotes();
+  if (tab === 'pricebook') return loadPriceBook();
+  if (tab === 'customers') return loadCustomers();
+  if (tab === 'members') return loadMembers();
+  if (tab === 'invitations') return loadInvitations();
+  if (tab === 'outbox') return loadOutbox();
+  if (tab === 'audit') { auditBefore = null; $('audit-body').innerHTML = ''; return loadAudit(); }
+  if (tab === 'settings') return loadSettings();
+  if (tab === 'mail') return loadMail();
+  if (tab === 'health') return loadHealth();
+}
+const fmtBytes = b => b == null ? '—' : b > 1e9 ? (b / 1e9).toFixed(2) + ' GB' : b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : b > 1e3 ? (b / 1e3).toFixed(0) + ' KB' : b + ' B';
+async function loadHealth() {
+  const h = await rpc('health');
+  if (!h.ok) { $('health-summary').textContent = h.reason; return; }
+  const hb = h.heartbeats || {}, win = h.windows || {}, lim = h.limits || {}, m = (h.latest || {}).metrics || {};
+  const now = Date.now();
+  $('health-summary').innerHTML = ['tick', 'daily', 'monitor'].map(j => {
+    const x = hb[j]; if (!x) return `<span class="pill">${j}: never run</span> `;
+    const age = Math.floor((now - new Date(x.last_run_at)) / 60000), late = win[j] != null && age > win[j];
+    return `<span class="pill ${late ? 'failed' : 'active'}">${j}: ${age} min ago${late ? ' — LATE' : ''}</span> `;
+  }).join('') + `<span class="pill">mode: ${esc(JSON.stringify(h.email_mode))}</span> <span class="pill">budget: ${esc(JSON.stringify(h.budget_monthly_usd))}</span>`;
+  const rows = [['db_bytes', fmtBytes(m.db_bytes), fmtBytes(lim.db_bytes)], ['app_schema_bytes', fmtBytes(m.app_schema_bytes), ''], ['storage_bytes', fmtBytes(m.storage_bytes), fmtBytes(lim.storage_bytes)],
+    ['auth_users', m.auth_users, lim.auth_users], ['members_active', m.members_active, ''], ['outbox_queued', m.outbox_queued, lim.outbox_queued], ['outbox_oldest_minutes', m.outbox_oldest_minutes, lim.outbox_oldest_minutes],
+    ['outbox_failed', m.outbox_failed, ''], ['audit_rows', m.audit_rows, ''], ['email_log_rows', m.email_log_rows, ''], ['cron_failures (45 min)', (m.cron_failures || []).length, '0']];
+  $('health-body').innerHTML = rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1] ?? '—')}</td><td>${esc(r[2] ?? '')}</td></tr>`).join('');
+  const bk = await rpc('backup_status');
+  if (bk.ok) {
+    const ls = bk.last_success, lf = bk.last_failure, lr = bk.last_restore_test;
+    $('backup-summary').innerHTML = `<span class="pill ${bk.expected === true ? 'active' : ''}">morning alert ${bk.expected === true ? 'armed' : 'not armed yet (arms after the first offsite success)'}</span> `
+      + (ls ? `<span class="pill active">last success ${et(ls.finished_at)} · ${ls.destination} · ${fmtBytes(ls.size_bytes)}</span> ` : '<span class="pill">no successful backup yet</span> ')
+      + (lf ? `<span class="pill failed">last failure ${et(lf.finished_at)}: ${esc(lf.error || '')}</span> ` : '')
+      + (lr ? `<span class="pill ${lr.restore_ok ? 'active' : 'failed'}">restore test ${et(lr.restore_tested_at)}: ${lr.restore_ok ? 'OK' : 'FAILED'} — ${esc(lr.restore_notes || '')}</span>` : '<span class="pill">no restore test yet</span>')
+      + `<p style="font-size:13px;color:var(--muted);margin-top:8px">${bk.runs_30d} run(s) in the last 30 days. Backups run nightly as a GitHub Action in the private repo; encrypted before they leave the database; shipped to Backblaze B2 once its keys are set, kept as a workflow artifact until then.</p>`;
+  }
+  const { data: snaps } = await sb.from('usage_snapshots').select('taken_at,metrics,alerts').order('id', { ascending: false }).limit(20);
+  $('snap-body').innerHTML = (snaps || []).map(s => `<tr><td>${et(s.taken_at)}</td><td>${s.alerts.length ? `<span class="pill failed">${s.alerts.length}</span> <code>${esc(JSON.stringify(s.alerts))}</code>` : '<span class="pill active">none</span>'}</td><td>${fmtBytes(s.metrics.db_bytes)}</td><td>${s.metrics.outbox_queued}</td></tr>`).join('') || '<tr><td colspan="4">No checks yet.</td></tr>';
+}
+async function loadMail() {
+  const { data: hb } = await sb.from('worker_heartbeat').select('job,last_run_at,runs,last_result').order('job');
+  $('hb-body').innerHTML = (hb || []).map(h => `<tr><td>${esc(h.job)}</td><td>${et(h.last_run_at)}</td><td>${h.runs}</td><td><code>${esc(JSON.stringify(h.last_result))}</code></td></tr>`).join('') || '<tr><td colspan="4">The worker has not run yet.</td></tr>';
+  const { data, error } = await sb.from('email_log').select('id,logged_at,event,recipient,subject,body_text,body_html').order('id', { ascending: false }).limit(50);
+  if (error) { $('mail-body').innerHTML = `<tr><td colspan="6">${esc(error.message)}</td></tr>`; return; }
+  $('mail-body').innerHTML = (data || []).map(m => `<tr><td>${m.id}</td><td>${et(m.logged_at)}</td><td>${esc(m.event)}</td><td>${esc(m.recipient)}</td><td>${esc(m.subject)}</td><td><button class="small secondary" data-mail="${m.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">Nothing logged yet.</td></tr>';
+  $('mail-body').querySelectorAll('button[data-mail]').forEach(b => b.onclick = () => {
+    const m = data.find(x => String(x.id) === b.dataset.mail);
+    $('mail-view').classList.remove('hidden');
+    $('mail-view').innerHTML = `<p><strong>${esc(m.subject)}</strong> → ${esc(m.recipient)}</p><pre style="white-space:pre-wrap;font-size:13px">${esc(m.body_text)}</pre><details><summary>HTML version</summary><iframe sandbox="" style="width:100%;height:420px;border:0" srcdoc="${esc(m.body_html)}"></iframe></details>`;
+  });
+  if (!$('prev-event').options.length) {
+    const { data: ev } = await sb.from('email_templates').select('event').order('event');
+    $('prev-event').innerHTML = (ev || []).map(e => `<option>${esc(e.event)}</option>`).join('');
+  }
+}
+$('prev-go').onclick = async () => {
+  const r = await rpc('render_preview', { p_event: $('prev-event').value });
+  $('prev-view').classList.remove('hidden');
+  $('prev-view').innerHTML = r.ok ? `<p><strong>${esc(r.subject)}</strong></p><iframe sandbox="" style="width:100%;height:420px;border:0" srcdoc="${esc(r.html)}"></iframe>` : esc(r.reason);
+};
+async function loadMembers() {
+  const { data: members, error } = await sb.from('members').select('id,email,display_name,status,status_reason').order('display_name');
+  if (error) return msg('inv-msg', error.message);
+  const { data: roles } = await sb.from('member_roles').select('member_id,role');
+  const me = await rpc('whoami');
+  $('members-body').innerHTML = members.map(m => {
+    const rs = (roles || []).filter(r => r.member_id === m.id).map(r => r.role).join(', ');
+    const self = me.member && me.member.id === m.id;
+    let actions = '';
+    if (!self && m.status === 'active') actions = `<button class="small secondary" data-status="suspended" data-id="${m.id}">Suspend</button>`;
+    if (!self && m.status === 'suspended') actions = `<button class="small secondary" data-status="active" data-id="${m.id}">Reactivate</button>`;
+    if (!self && m.status !== 'removed') actions += ` <button class="small secondary" data-status="removed" data-id="${m.id}">Remove</button>`;
+    return `<tr><td>${esc(m.display_name)}</td><td>${esc(m.email)}</td><td>${esc(rs)}</td><td><span class="pill ${m.status}">${m.status}</span></td><td>${actions}</td></tr>`;
+  }).join('');
+  $('members-body').querySelectorAll('button[data-status]').forEach(b => b.onclick = async () => {
+    const reason = prompt(`Reason for setting this member to "${b.dataset.status}" (recorded in the audit log):`);
+    if (!reason) return;
+    const r = await rpc('member_set_status', { p_member: b.dataset.id, p_new: b.dataset.status, p_reason: reason });
+    msg('inv-msg', r.ok ? 'Done.' : r.reason, r.ok); loadMembers();
+  });
+}
+$('inv-go').onclick = async () => {
+  msg('inv-msg', '');
+  try {
+    const r = await rpc('invitation_create', { p_email: $('inv-email').value.trim(), p_display_name: $('inv-name').value.trim(), p_role: $('inv-role').value, p_reason: $('inv-reason').value.trim() });
+    msg('inv-msg', r.ok ? 'Invitation created and queued (expires ' + et(r.expires_at) + ').' : r.reason, r.ok);
+    if (r.ok) { $('inv-email').value = $('inv-name').value = $('inv-reason').value = ''; loadMembers(); }
+  } catch (e) { msg('inv-msg', e.message); }
+};
+async function loadInvitations() {
+  const { data, error } = await sb.from('invitations').select('id,email,role,status,expires_at,created_at').order('created_at', { ascending: false });
+  if (error) return;
+  $('inv-body').innerHTML = (data || []).map(i => `<tr><td>${esc(i.email)}</td><td>${esc(i.role)}</td><td><span class="pill ${i.status === 'pending' ? 'invited' : ''}">${i.status}</span></td><td>${et(i.expires_at)}</td><td>${i.status === 'pending' ? `<button class="small secondary" data-act="replace" data-id="${i.id}">Re-send</button> <button class="small secondary" data-act="cancel" data-id="${i.id}">Cancel</button>` : ''}</td></tr>`).join('');
+  $('inv-body').querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => {
+    const reason = prompt('Reason (recorded in the audit log):'); if (!reason) return;
+    const r = await rpc(b.dataset.act === 'replace' ? 'invitation_replace' : 'invitation_cancel', { p_invitation: b.dataset.id, p_reason: reason });
+    if (!r.ok) alert(r.reason); loadInvitations();
+  });
+}
+async function loadOutbox() {
+  const { data, error } = await sb.from('outbox').select('id,event,recipient,status,not_before,attempts,last_error').order('id', { ascending: false }).limit(100);
+  if (error) { $('outbox-body').innerHTML = `<tr><td colspan="7">${esc(error.message)}</td></tr>`; return; }
+  $('outbox-body').innerHTML = (data || []).map(o => `<tr><td>${o.id}</td><td>${esc(o.event)}</td><td>${esc(o.recipient)}</td><td><span class="pill ${o.status}">${o.status}</span></td><td>${et(o.not_before)}</td><td>${o.attempts}</td><td>${esc(o.last_error || '')}</td></tr>`).join('');
+}
+let auditBefore = null;
+async function loadAudit() {
+  const rows = await rpc('audit_read', { p_before_id: auditBefore, p_limit: 50 });
+  $('audit-body').insertAdjacentHTML('beforeend', (rows || []).map(r => `<tr><td>${r.id}</td><td>${et(r.at)}</td><td>${esc(r.action)}</td><td>${esc(r.entity)} ${esc(r.entity_id || '')}</td><td><code>${esc(JSON.stringify(r.details))}</code></td></tr>`).join(''));
+  if (rows && rows.length) auditBefore = rows[rows.length - 1].id;
+}
+$('audit-more').onclick = loadAudit;
+$('audit-verify').onclick = async () => { const r = await rpc('audit_verify_owner'); msg('audit-msg', r.ok ? `Chain verifies (${r.anchors_checked} anchor(s) checked).` : 'PROBLEM: ' + JSON.stringify(r), r.ok); };
+async function loadSettings() {
+  const { data } = await sb.from('settings').select('key,value,updated_at').order('key');
+  $('settings-body').innerHTML = (data || []).map(s => `<tr><td>${esc(s.key)}</td><td><code>${esc(JSON.stringify(s.value))}</code></td><td>${et(s.updated_at)}</td></tr>`).join('');
+}
+$('set-go').onclick = async () => {
+  msg('set-msg', '');
+  let value; try { value = JSON.parse($('set-value').value); } catch (_) { return msg('set-msg', 'Value must be JSON, e.g. "name@example.com" with the quotes.'); }
+  try { const r = await rpc('setting_set', { p_key: $('set-key').value, p_value: value, p_reason: $('set-reason').value.trim() }); msg('set-msg', r.ok ? 'Saved.' : r.reason, r.ok); loadSettings(); }
+  catch (e) { msg('set-msg', e.message); }
+};
+
+// ----- leads (R1L-21) -----
+const LEAD_STATUS = { new: 'New', contacted: 'Contacted', survey_booked: 'Survey booked', quoted: 'Quoted', won: 'Won', lost: 'Lost' };
+let memberNames = {};
+async function loadNames() {
+  const { data } = await sb.from('members').select('id,display_name,status');
+  memberNames = {}; (data || []).forEach(m => memberNames[m.id] = m.display_name);
+  return (data || []).filter(m => m.status === 'active');
+}
+async function loadLeads() {
+  await loadNames();
+  const { data, error } = await sb.from('leads').select('*').order('created_at', { ascending: false }).limit(200);
+  if (error) { $('leads-body').innerHTML = `<tr><td colspan="7">${esc(error.message)}</td></tr>`; return; }
+  $('leads-body').innerHTML = (data || []).map(l => `<tr><td>${esc(l.contact_name)}${l.test_flag !== 'none' ? ` <span class="pill ${l.test_flag === 'clear' ? '' : 'invited'}">${l.test_flag === 'clear' ? 'TEST' : 'test?'}</span>` : ''}</td><td>${esc(l.source)}</td><td>${esc(l.need)}</td><td><span class="pill ${l.status === 'won' ? 'active' : l.status === 'lost' ? 'failed' : ''}">${LEAD_STATUS[l.status]}</span>${l.qualified_at ? ' <span class="pill active">qualified</span>' : ''}</td><td>${esc(memberNames[l.owner_member_id] || '')}</td><td>${l.next_follow_up || ''}</td><td><button class="small secondary" data-lead="${l.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="7">No leads yet.</td></tr>';
+  $('leads-body').querySelectorAll('button[data-lead]').forEach(b => b.onclick = () => openLead(data.find(x => x.id === b.dataset.lead)));
+  if (window.__me.is_owner) loadLeadPending();
+}
+async function openLead(l) {
+  const { data: acts } = await sb.from('lead_activities').select('*').eq('lead_id', l.id).order('at', { ascending: false });
+  const open = !['won', 'lost'].includes(l.status);
+  const next = { new: ['contacted'], contacted: ['survey_booked', 'quoted'], survey_booked: ['quoted'], quoted: [] }[l.status] || [];
+  const d = $('lead-detail'); d.classList.remove('hidden');
+  d.innerHTML = `<p><strong>${esc(l.contact_name)}</strong> · ${esc(l.contact_phone || '')} ${esc(l.contact_email || '')} · ${esc(l.town || '')} · owner ${esc(memberNames[l.owner_member_id] || '')}<br>
+    <small>${esc(l.need)} ${l.details ? '— ' + esc(l.details) : ''}</small>${l.original_message ? `<br><small style="color:var(--muted)">Original: ${esc(l.original_message)}</small>` : ''}
+    ${l.status === 'lost' ? `<br><small>Lost: ${esc(l.lost_reason)} ${esc(l.lost_notes || '')}</small>` : ''}${l.customer_id ? `<br><small>Customer: <a href="#" data-cust="${l.customer_id}">open</a></small>` : ''}</p>
+    <div>${open ? `<button class="small secondary" data-act="activity">Log call / text / email / visit / note</button>
+      ${next.map(n => `<button class="small secondary" data-status="${n}">→ ${LEAD_STATUS[n]}</button>`).join(' ')}
+      ${l.qualified_at ? '<button class="small secondary" data-status="won">→ Won</button>' : '<button class="small" data-act="qualify">Qualify (creates the customer)</button>'}
+      <button class="small secondary" data-status="lost">→ Lost</button>
+      <button class="small secondary" data-act="reassign">Reassign…</button>` : ''}
+      ${window.__me.is_owner && l.test_flag === 'ambiguous' ? `<button class="small secondary" data-test="none">Not a test</button> <button class="small secondary" data-test="clear">It is a test</button>` : ''}</div>
+    <table style="margin-top:10px"><thead><tr><th>When (ET)</th><th>Who</th><th>Kind</th><th>Notes</th><th>Follow-up</th></tr></thead><tbody>${(acts || []).map(a => `<tr><td>${et(a.at)}</td><td>${esc(memberNames[a.member_id] || '')}</td><td>${esc(a.kind)}</td><td>${esc(a.notes || '')}</td><td>${a.next_follow_up || ''}</td></tr>`).join('')}</tbody></table>
+    <div class="msg" id="lead-msg"></div>`;
+  const done = async (r) => { msg('lead-msg', r.ok ? 'Done.' : r.reason, r.ok); await loadLeads(); if (r.ok) { const { data } = await sb.from('leads').select('*').eq('id', l.id).single(); if (data) openLead(data); } };
+  d.querySelectorAll('button[data-status]').forEach(b => b.onclick = async () => {
+    let reason = null, notes = null;
+    if (b.dataset.status === 'lost') {
+      reason = prompt('Lost reason: price, timing, chose_another_provider, no_response, other'); if (!reason) return;
+      if (reason === 'other') { notes = prompt('Notes (required for Other):'); if (!notes) return; }
+    }
+    done(await rpc('lead_set_status', { p_lead: l.id, p_new: b.dataset.status, p_lost_reason: reason, p_lost_notes: notes }));
+  });
+  d.querySelectorAll('button[data-test]').forEach(b => b.onclick = async () => done(await rpc('lead_set_test', { p_lead: l.id, p_flag: b.dataset.test })));
+  d.querySelector('[data-act="activity"]')?.addEventListener('click', async () => {
+    const kind = prompt('Kind: call, text, email, visit or note'); if (!kind) return;
+    const notes = prompt('Notes:') || ''; const fu = prompt('Next follow-up date (YYYY-MM-DD, optional):') || null;
+    done(await rpc('lead_activity_add', { p_lead: l.id, p_kind: kind.trim().toLowerCase(), p_notes: notes, p_next_follow_up: fu }));
+  });
+  d.querySelector('[data-act="qualify"]')?.addEventListener('click', async () => {
+    const a1 = prompt('Service address (street). Leave blank only if there is an explicit exception:') || '';
+    let exc = ''; if (!a1) { exc = prompt('Explicit exception (why no address yet):') || ''; if (!exc) return; }
+    const city = prompt('City/town:', l.town || '') || ''; const zip = a1 ? (prompt('ZIP (optional):') || '') : '';
+    const cname = prompt('Customer name (business or person):', l.contact_name) || l.contact_name;
+    const kind = confirm('Is this a business? (OK = business, Cancel = person)') ? 'business' : 'person';
+    const r = await rpc('lead_qualify', { p_lead: l.id, p_loc: { address_line1: a1, city, postal_code: zip, address_exception: exc, customer_name: cname, kind } });
+    if (r.ok && r.pending_review) r.reason = 'Possible existing customer found — sent to Terry to decide. Nothing was created.';
+    if (r.ok && r.ownership_conflict) msg('lead-msg', 'Linked to an existing customer whose rep is someone else — ownership conflict sent to Terry.', true);
+    done(r);
+  });
+  d.querySelector('[data-act="reassign"]')?.addEventListener('click', async () => {
+    const active = await loadNames();
+    const who = prompt('Hand this lead to (type the name exactly):\n' + active.map(m => m.display_name).join('\n')); if (!who) return;
+    const to = active.find(m => m.display_name === who); if (!to) return msg('lead-msg', 'No active member with that name.');
+    const reason = prompt('Reason:'); if (!reason) return;
+    const r = await rpc('lead_reassign_request', { p_lead: l.id, p_to: to.id, p_reason: reason });
+    if (r.ok && r.pending) r.reason = 'Request sent to Terry for approval.';
+    done(r);
+  });
+  d.querySelector('a[data-cust]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('.tabs [data-tab="customers"]').click(); setTimeout(() => openCustomer(e.target.dataset.cust), 300); });
+}
+async function loadLeadPending() {
+  const [{ data: rq }, { data: mr }, { data: oc }] = await Promise.all([
+    sb.from('lead_reassignments').select('*').eq('status', 'pending'),
+    sb.from('match_reviews').select('*').eq('status', 'pending'),
+    sb.from('ownership_conflicts').select('*').eq('status', 'pending')]);
+  const custName = async id => (await sb.from('customers').select('display_name').eq('id', id).single()).data?.display_name || id;
+  let html = '';
+  for (const r of rq || []) html += `<p><span class="pill invited">reassignment</span> ${esc(memberNames[r.requested_by])} asks to hand a lead from ${esc(memberNames[r.from_member_id])} to ${esc(memberNames[r.to_member_id])}: "${esc(r.reason)}" <button class="small secondary" data-rq="${r.id}" data-ok="true">Approve</button> <button class="small secondary" data-rq="${r.id}" data-ok="false">Decline</button></p>`;
+  for (const m of mr || []) {
+    const cands = m.candidates.filter(c => c.customer_id);
+    html += `<p><span class="pill invited">match review</span> Lead <code>${m.lead_id.slice(0, 8)}</code> may be an existing customer: ${cands.map(c => `<button class="small secondary" data-mr="${m.id}" data-cust="${c.customer_id}">Link to ${esc(c.display_name)} (${esc(c.why)})</button>`).join(' ')} <button class="small secondary" data-mr="${m.id}" data-cust="">Create a new customer</button></p>`;
+  }
+  for (const c of oc || []) html += `<p><span class="pill invited">ownership</span> ${esc(await custName(c.customer_id))}: rep is ${esc(memberNames[c.current_rep])}, lead owner is ${esc(memberNames[c.requesting_rep])} <button class="small secondary" data-oc="${c.id}" data-ok="false">Keep ${esc(memberNames[c.current_rep])}</button> <button class="small secondary" data-oc="${c.id}" data-ok="true">Assign to ${esc(memberNames[c.requesting_rep])}</button></p>`;
+  $('lead-pending').innerHTML = html ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Waiting for you</strong>${html}</div>` : '';
+  $('lead-pending').querySelectorAll('button[data-rq]').forEach(b => b.onclick = async () => { const r = await rpc('lead_reassign_decide', { p_request: +b.dataset.rq, p_approve: b.dataset.ok === 'true', p_note: prompt('Note (optional):') || null }); if (!r.ok) alert(r.reason); loadLeads(); });
+  $('lead-pending').querySelectorAll('button[data-mr]').forEach(b => b.onclick = async () => { const r = await rpc('match_review_decide', { p_review: +b.dataset.mr, p_customer: b.dataset.cust || null }); if (!r.ok) alert(r.reason); loadLeads(); });
+  $('lead-pending').querySelectorAll('button[data-oc]').forEach(b => b.onclick = async () => { const reason = prompt('Reason:'); if (!reason) return; const r = await rpc('ownership_conflict_decide', { p_conflict: +b.dataset.oc, p_assign_to_requesting: b.dataset.ok === 'true', p_reason: reason }); if (!r.ok) alert(r.reason); loadLeads(); });
+}
+$('ld-go').onclick = async () => {
+  msg('ld-msg', '');
+  const p = { source: $('ld-source').value, contact_name: $('ld-name').value, contact_phone: $('ld-phone').value, contact_email: $('ld-email').value, town: $('ld-town').value, need: $('ld-need').value, details: $('ld-details').value, original_message: $('ld-orig').value };
+  if ($('ld-claimed').value) p.original_claimed_at = new Date($('ld-claimed').value).toISOString();
+  try { const r = await rpc('lead_create', { p }); msg('ld-msg', r.ok ? 'Lead added' + (r.test_flag === 'clear' ? ' (marked TEST: it will never reach Square).' : r.test_flag === 'ambiguous' ? ' (looks like it might be a test — Terry will check).' : '.') : r.reason, r.ok);
+    if (r.ok) { ['ld-name','ld-phone','ld-email','ld-town','ld-need','ld-details','ld-orig','ld-claimed'].forEach(i => $(i).value = ''); loadLeads(); } }
+  catch (e) { msg('ld-msg', e.message); }
+};
+
+// ----- customers (R1L-22, R1L-24, R1L-25) -----
+async function loadCustomers() {
+  await loadNames();
+  const { data, error } = await sb.from('customers').select('*').neq('status', 'merged').order('display_name');
+  if (error) { $('cust-body').innerHTML = `<tr><td colspan="6">${esc(error.message)}</td></tr>`; return; }
+  $('cust-body').innerHTML = (data || []).map(c => `<tr><td>${esc(c.display_name)}</td><td>${esc(c.kind)}</td><td>${esc(memberNames[c.rep_member_id] || '')}</td><td><span class="pill ${c.square_state === 'in_square' ? 'active' : ['conflict','flagged_deleted','flagged_merged'].includes(c.square_state) ? 'failed' : ''}">${esc(c.square_state.replace(/_/g, ' '))}</span></td><td>${esc(c.status)}</td><td><button class="small secondary" data-cust="${c.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">No customers yet — a customer is created when a lead qualifies.</td></tr>';
+  $('cust-body').querySelectorAll('button[data-cust]').forEach(b => b.onclick = () => openCustomer(b.dataset.cust));
+  if (window.__me.is_owner) {
+    const w = await rpc('square_watch');
+    const { data: dups } = await sb.from('duplicate_candidates').select('*').eq('status', 'open');
+    const name = id => (data || []).find(c => c.id === id)?.display_name || id.slice(0, 8);
+    $('cust-owner').innerHTML = `<p><span class="pill">Square mode: ${esc(w.mode)}</span> <span class="pill">${w.not_yet_in_square.length} not yet in Square</span> <span class="pill ${w.conflicts.length ? 'failed' : ''}">${w.conflicts.length} conflict/flagged</span> <span class="pill">queue: ${w.queue.queued} queued, ${w.queue.failed} failed</span></p>`
+      + ((dups || []).length ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Possible duplicates</strong>${dups.map(d => `<p>${esc(name(d.customer_a))} ↔ ${esc(name(d.customer_b))} (${esc(d.why)}) <button class="small secondary" data-merge="${d.customer_a}|${d.customer_b}">Merge into first</button> <button class="small secondary" data-merge="${d.customer_b}|${d.customer_a}">Merge into second</button> <button class="small secondary" data-dismiss="${d.id}">Not a duplicate</button></p>`).join('')}</div>` : '');
+    $('cust-owner').querySelectorAll('button[data-merge]').forEach(b => b.onclick = async () => { const [k, d] = b.dataset.merge.split('|'); const reason = prompt('Reason for merging:'); if (!reason) return; const r = await rpc('customer_merge', { p_keep: k, p_drop: d, p_reason: reason }); if (!r.ok) alert(r.reason); loadCustomers(); });
+    $('cust-owner').querySelectorAll('button[data-dismiss]').forEach(b => b.onclick = async () => { const r = await rpc('duplicate_dismiss', { p_id: +b.dataset.dismiss, p_reason: prompt('Reason:') || 'not a duplicate' }); if (!r.ok) alert(r.reason); loadCustomers(); });
+  }
+}
+async function openCustomer(id) {
+  const { data: c } = await sb.from('customers').select('*').eq('id', id).single();
+  if (!c) return;
+  const [{ data: locs }, { data: cons }, { data: leads }] = await Promise.all([
+    sb.from('customer_locations').select('*').eq('customer_id', id).order('created_at'),
+    sb.from('customer_contacts').select('*').eq('customer_id', id).order('created_at'),
+    sb.from('leads').select('id,contact_name,status,need,created_at').eq('customer_id', id)]);
+  let note = null; if (window.__me.is_owner) note = (await sb.from('private_notes').select('body,updated_at').eq('customer_id', id).maybeSingle()).data;
+  const d = $('cust-detail'); d.classList.remove('hidden');
+  const owner = window.__me.is_owner;
+  d.innerHTML = `<p><strong>${esc(c.display_name)}</strong> (${esc(c.kind)}) · rep ${esc(memberNames[c.rep_member_id] || '')} · Square: ${esc(c.square_state.replace(/_/g, ' '))}${c.square_customer_id ? ' <code>' + esc(c.square_customer_id) + '</code> v' + c.square_version : ''}
+      <br><small>Hub ID <code>${c.id}</code></small></p>
+    <div><button class="small secondary" data-act="edit">Edit name / kind</button> <button class="small secondary" data-act="notes">Operational notes</button>
+      ${owner ? '<button class="small secondary" data-act="rep">Change rep</button> <button class="small secondary" data-act="archive">Archive</button>' : ''}</div>
+    ${c.operational_notes ? `<p><small>Notes: ${esc(c.operational_notes)}</small></p>` : ''}
+    <h3 style="font-size:14px;margin:12px 0 4px">Locations <button class="small secondary" data-loc="">Add</button></h3>
+    <table><tbody>${(locs || []).map(l => `<tr><td>${esc(l.label)}${l.is_primary ? ' <span class="pill active">primary</span>' : ''}</td><td>${esc(l.address_line1 || '(' + l.address_exception + ')')} ${esc(l.address_line2 || '')}, ${esc(l.city || '')} ${esc(l.state || '')} ${esc(l.postal_code || '')}</td><td><button class="small secondary" data-loc="${l.id}">Edit</button></td></tr>`).join('')}</tbody></table>
+    <h3 style="font-size:14px;margin:12px 0 4px">Contacts <button class="small secondary" data-con="">Add</button></h3>
+    <table><tbody>${(cons || []).map(k => `<tr><td>${esc(k.name)}</td><td><span class="pill ${k.role === 'primary' ? 'active' : ''}">${esc(k.role.replace('_', ' '))}</span>${k.square_unsubscribed ? ' <span class="pill failed">unsubscribed (Square)</span>' : ''}</td><td>${esc(k.email || '')} ${esc(k.phone || '')}</td><td><button class="small secondary" data-con="${k.id}">Edit</button></td></tr>`).join('')}</tbody></table>
+    <p><small>Square contact = billing contact, else primary. Exactly one primary; at most one billing.</small></p>
+    ${owner ? `<h3 style="font-size:14px;margin:12px 0 4px">Private note (owner only; the text is never logged)</h3><textarea id="pn-body" rows="3">${esc(note?.body || '')}</textarea><button class="small" id="pn-save">Save private note</button>` : ''}
+    <h3 style="font-size:14px;margin:12px 0 4px">Timeline</h3>
+    <table><tbody>${(leads || []).map(l => `<tr><td>${et(l.created_at)}</td><td>lead: ${esc(l.contact_name)} — ${esc(l.need)} (${esc(l.status)})</td></tr>`).join('') || '<tr><td>—</td></tr>'}</tbody></table>
+    <div class="msg" id="cust-msg"></div>`;
+  const done = async r => { msg('cust-msg', r.ok ? 'Saved.' : r.reason, r.ok); if (r.ok) { await loadCustomers(); openCustomer(id); } };
+  d.querySelector('[data-act="edit"]').onclick = async () => { const n = prompt('Name:', c.display_name); if (!n) return; const k = confirm('Business? (OK = business, Cancel = person)') ? 'business' : 'person'; done(await rpc('customer_update', { p_customer: id, p: { display_name: n, kind: k } })); };
+  d.querySelector('[data-act="notes"]').onclick = async () => { const n = prompt('Operational notes (no passwords or codes):', c.operational_notes || ''); if (n === null) return; done(await rpc('customer_update', { p_customer: id, p: { operational_notes: n } })); };
+  d.querySelector('[data-act="rep"]')?.addEventListener('click', async () => { const active = await loadNames(); const who = prompt('New rep (name exactly):\n' + active.map(m => m.display_name).join('\n')); const to = active.find(m => m.display_name === who); if (!to) return; const reason = prompt('Reason:'); if (!reason) return; done(await rpc('customer_set_rep', { p_customer: id, p_rep: to.id, p_reason: reason })); });
+  d.querySelector('[data-act="archive"]')?.addEventListener('click', async () => { const reason = prompt('Reason for archiving:'); if (!reason) return; done(await rpc('customer_archive', { p_customer: id, p_reason: reason })); });
+  d.querySelectorAll('button[data-loc]').forEach(b => b.onclick = async () => {
+    const l = (locs || []).find(x => x.id === b.dataset.loc) || {};
+    const label = prompt('Label:', l.label || 'Main'); if (label === null) return;
+    const a1 = prompt('Street address (blank = exception):', l.address_line1 || '') ?? ''; let exc = l.address_exception || '';
+    if (!a1) { exc = prompt('Explicit exception:', exc) || ''; if (!exc) return; }
+    const city = prompt('City:', l.city || '') || ''; const zip = prompt('ZIP:', l.postal_code || '') || '';
+    done(await rpc('location_set', { p_customer: id, p_location: b.dataset.loc || null, p: { label, address_line1: a1, address_line2: l.address_line2 || null, city, postal_code: zip, address_exception: exc, state: l.state || 'OH' } }));
+  });
+  d.querySelectorAll('button[data-con]').forEach(b => b.onclick = async () => {
+    const k = (cons || []).find(x => x.id === b.dataset.con) || {};
+    const name = prompt('Name:', k.name || ''); if (!name) return;
+    const email = prompt('Email:', k.email || '') ?? ''; const phone = prompt('Phone:', k.phone || '') ?? '';
+    const role = prompt('Role: primary, billing, on_site or other', k.role || 'other'); if (!role) return;
+    done(await rpc('contact_set', { p_customer: id, p_contact: b.dataset.con || null, p: { name, email, phone, role: role.trim().toLowerCase() } }));
+  });
+  $('pn-save')?.addEventListener('click', async () => done(await rpc('private_note_set', { p_customer: id, p_body: $('pn-body').value })));
+}
+
+// ----- price book (R1L-26, R1L-27) -----
+const money = c => c == null ? '—' : '$' + (c / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const CLASSES = ['equipment','labor','materials','travel','recurring_service'];
+async function loadPriceBook() {
+  const [{ data: items }, { data: costs }, { data: bundles }, { data: bitems }] = await Promise.all([
+    sb.from('catalog_items').select('*').order('name'), sb.from('item_costs').select('*'), sb.from('catalog_bundles').select('*').order('name'), sb.from('catalog_bundle_items').select('*')]);
+  const cost = id => (costs || []).find(c => c.item_id === id);
+  $('pb-body').innerHTML = (items || []).map(i => `<tr><td>${esc(i.name)}${i.variation ? ' — ' + esc(i.variation) : ''}${i.active ? '' : ' <span class="pill failed">inactive</span>'}</td><td>${esc(i.sku || '')}</td><td>${esc(i.source)}</td><td>${money(i.price_cents)}</td>
+    <td><select data-class="${i.id}"><option value="">— unclassified —</option>${CLASSES.map(c => `<option ${i.classification === c ? 'selected' : ''}>${c}</option>`).join('')}</select></td>
+    <td>${cost(i.id) ? money(cost(i.id).cost_cents) + ' <small>' + esc(cost(i.id).supplier || '') + '</small>' : '<span class="pill failed">missing</span>'} <button class="small secondary" data-cost="${i.id}">Set</button></td>
+    <td>${i.source === 'manual' ? `<button class="small secondary" data-edit="${i.id}">Edit</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7">No items yet. Add a hand-entered item, or connect the Square sandbox.</td></tr>';
+  $('pb-body').querySelectorAll('select[data-class]').forEach(e => e.onchange = async () => { if (!e.value) return; const r = await rpc('catalog_classify', { p_item: e.dataset.class, p_class: e.value }); msg('pb-msg', r.ok ? 'Classified.' : r.reason, r.ok); loadPriceBook(); });
+  $('pb-body').querySelectorAll('button[data-cost]').forEach(b => b.onclick = async () => { const c = prompt('Supplier cost ($):'); if (c === null || c === '') return; const sup = prompt('Supplier (optional):') || null; const r = await rpc('item_cost_set', { p_item: b.dataset.cost, p_cost_cents: Math.round(parseFloat(c) * 100), p_supplier: sup }); msg('pb-msg', r.ok ? 'Cost saved.' : r.reason, r.ok); loadPriceBook(); });
+  $('pb-body').querySelectorAll('button[data-edit]').forEach(b => b.onclick = async () => { const i = items.find(x => x.id === b.dataset.edit); const n = prompt('Name:', i.name); if (!n) return; const p = prompt('Price ($):', (i.price_cents / 100).toFixed(2)); if (p === null) return; const act = confirm('Keep active? (OK = active, Cancel = inactive)'); const r = await rpc('catalog_item_set_manual', { p_item: i.id, p: { name: n, price_cents: Math.round(parseFloat(p) * 100), active: act } }); msg('pb-msg', r.ok ? 'Saved.' : r.reason, r.ok); loadPriceBook(); });
+  $('pb-bundles').innerHTML = (bundles || []).map(b => `<p><strong>${esc(b.name)}</strong>: ${(bitems || []).filter(x => x.bundle_id === b.id).map(x => { const i = (items || []).find(y => y.id === x.item_id); return esc((i ? i.name : '?') + ' × ' + x.qty); }).join(', ')}</p>`).join('') + '<button class="small secondary" id="pb-bundle-add">Add bundle</button>';
+  $('pb-bundle-add').onclick = async () => {
+    const name = prompt('Bundle name:'); if (!name) return;
+    const spec = prompt('Components as "SKU×qty, SKU×qty" (every item must be classified):'); if (!spec) return;
+    const comps = []; for (const part of spec.split(',')) { const m = part.trim().match(/^(.+?)\s*[x×]\s*([\d.]+)$/i); const i = (items || []).find(y => (y.sku || '').toLowerCase() === (m ? m[1] : part.trim()).toLowerCase()); if (!i) return msg('pb-msg', 'Unknown SKU: ' + part); comps.push({ item_id: i.id, qty: m ? parseFloat(m[2]) : 1 }); }
+    const r = await rpc('catalog_bundle_set', { p_bundle: null, p_name: name, p_components: comps }); msg('pb-msg', r.ok ? 'Bundle saved.' : r.reason, r.ok); loadPriceBook();
+  };
+}
+$('pb-go').onclick = async () => { const r = await rpc('catalog_item_set_manual', { p_item: null, p: { name: $('pb-name').value, price_cents: Math.round(parseFloat($('pb-price').value || '0') * 100), classification: $('pb-class').value } }); msg('pb-msg', r.ok ? 'Item added.' : r.reason, r.ok); if (r.ok) { $('pb-name').value = $('pb-price').value = ''; loadPriceBook(); } };
+
+// ----- quotes (R1L-28 .. R1L-34) -----
+let custCache = [], locCache = [];
+async function loadQuotes() {
+  await loadNames();
+  const [{ data: custs }, { data: locs }, { data: quotes }] = await Promise.all([
+    sb.from('customers').select('id,display_name,status').eq('status', 'active').order('display_name'), sb.from('customer_locations').select('*'),
+    sb.from('quotes').select('*').order('created_at', { ascending: false }).limit(200)]);
+  custCache = custs || []; locCache = locs || [];
+  $('qn-cust').innerHTML = custCache.map(c => `<option value="${c.id}">${esc(c.display_name)}</option>`).join('');
+  const fillLoc = () => { $('qn-loc').innerHTML = locCache.filter(l => l.customer_id === $('qn-cust').value).map(l => `<option value="${l.id}">${esc(l.label)} — ${esc(l.address_line1 || l.address_exception || '')}</option>`).join(''); };
+  $('qn-cust').onchange = fillLoc; fillLoc();
+  const revs = (await sb.from('quote_revisions').select('quote_id,rev_no,total_cents,status').order('rev_no')).data || [];
+  $('quotes-body').innerHTML = (quotes || []).map(q => { const rv = revs.find(r => r.quote_id === q.id && r.rev_no === q.current_revision) || {}; return `<tr><td>${esc(q.number)}</td><td>${esc((custCache.find(c => c.id === q.customer_id) || {}).display_name || '')}</td><td>${q.current_revision}</td><td><span class="pill ${q.status === 'approved' || q.status === 'customer_accepted' ? 'active' : ['expired','cancelled','returned'].includes(q.status) ? 'failed' : q.status === 'internal_review' ? 'invited' : ''}">${esc(q.status.replace(/_/g, ' '))}</span></td><td>${money(rv.total_cents)}</td><td>${esc(memberNames[q.rep_member_id] || '')}</td><td><button class="small secondary" data-q="${q.id}">Open</button></td></tr>`; }).join('') || '<tr><td colspan="7">No quotes yet.</td></tr>';
+  $('quotes-body').querySelectorAll('button[data-q]').forEach(b => b.onclick = () => openQuote(b.dataset.q));
+  const { data: jobs } = await sb.from('jobs').select('*').order('created_at', { ascending: false });
+  $('jobs-body').innerHTML = (jobs || []).map(j => `<tr><td>${esc((custCache.find(c => c.id === j.customer_id) || {}).display_name || '')}</td><td>${esc((quotes || []).find(q => q.id === j.quote_id)?.number || '')}</td><td><span class="pill ${j.status === 'sold' ? 'active' : ''}">${esc(j.status.replace('_', ' '))}</span></td><td>${esc(memberNames[j.rep_member_id] || '')}</td><td>${et(j.created_at)}</td><td>${window.__me.is_owner ? `<button class="small secondary" data-job="${j.id}">Set status</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6">No jobs yet — a job opens when a customer accepts a quote.</td></tr>';
+  $('jobs-body').querySelectorAll('button[data-job]').forEach(b => b.onclick = async () => { const st = prompt('Status: survey, quoting, sold, scheduled, in_progress, complete, paid, lost'); if (!st) return; const r = await rpc('job_set_status', { p_job: b.dataset.job, p_status: st.trim(), p_reason: prompt('Reason:') || '' }); if (!r.ok) alert(r.reason); loadQuotes(); });
+  if (window.__me.is_owner) {
+    const { data: crs } = await sb.from('quote_change_requests').select('*').eq('status', 'pending');
+    const { data: rev } = await sb.from('quotes').select('id,number').eq('status', 'internal_review');
+    const { data: pend } = await sb.from('quote_acceptances').select('*').eq('status', 'pending_verification');
+    $('quote-pending').innerHTML = ((crs || []).length || (rev || []).length || (pend || []).length) ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Waiting for you</strong>` +
+      (rev || []).map(q => `<p><span class="pill invited">review</span> ${esc(q.number)} <button class="small secondary" data-open="${q.id}">Open</button></p>`).join('') +
+      (pend || []).map(a => `<p><span class="pill invited">written acceptance</span> ${esc((quotes || []).find(q => q.id === a.quote_id)?.number || '')} · ${esc(a.method.replace(/_/g, ' '))} · "${esc(a.reference)}" by ${esc(memberNames[a.recorded_by] || '')} <button class="small secondary" data-ver="${a.id}" data-ok="true">Verified — accept</button> <button class="small secondary" data-ver="${a.id}" data-ok="false">Reject</button></p>`).join('') +
+      (crs || []).map(c => `<p><span class="pill invited">${esc(c.kind)}</span> ${esc(memberNames[c.requested_by] || '')}: ${c.kind === 'custom' ? esc(c.proposal.description) + ' at ' + money(c.requested_price_cents) : money(c.list_price_cents) + ' → ' + money(c.requested_price_cents)} — "${esc(c.reason)}" (margin now ${c.margin_before ?? '?'} %) <button class="small secondary" data-cr="${c.id}" data-ok="true">Approve</button> <button class="small secondary" data-cr="${c.id}" data-ok="false">Decline</button></p>`).join('') + '</div>' : '';
+    $('quote-pending').querySelectorAll('button[data-open]').forEach(b => b.onclick = () => openQuote(b.dataset.open));
+    $('quote-pending').querySelectorAll('button[data-cr]').forEach(b => b.onclick = async () => { const r = await rpc('quote_change_decide', { p_request: +b.dataset.cr, p_approve: b.dataset.ok === 'true', p_note: prompt('Note (optional):') || null }); if (!r.ok) alert(r.reason); loadQuotes(); });
+    $('quote-pending').querySelectorAll('button[data-ver]').forEach(b => b.onclick = async () => { const chk = prompt('What did you check? (signature, date, quote number and revision on the document…)'); if (!chk) return; const r = await rpc('quote_written_acceptance_verify', { p_acceptance: +b.dataset.ver, p_ok: b.dataset.ok === 'true', p_checked: chk }); if (!r.ok) alert(r.reason); loadQuotes(); });
+  }
+}
+$('qn-go').onclick = async () => { const r = await rpc('quote_create', { p_customer: $('qn-cust').value, p_location: $('qn-loc').value, p_kind: $('qn-kind').value }); msg('qn-msg', r.ok ? 'Quote ' + r.number + ' started.' : r.reason, r.ok); if (r.ok) { await loadQuotes(); openQuote(r.id); } };
+async function openQuote(id) {
+  const { data: q } = await sb.from('quotes').select('*').eq('id', id).single(); if (!q) return;
+  const { data: rv } = await sb.from('quote_revisions').select('*').eq('quote_id', id).eq('rev_no', q.current_revision).single();
+  const { data: lines } = await sb.from('quote_lines').select('*').eq('revision_id', rv.id).order('line_no');
+  const { data: items } = await sb.from('catalog_items').select('id,name,variation,sku,price_cents,classification,active').eq('active', true).order('name');
+  const { data: bundles } = await sb.from('catalog_bundles').select('id,name').eq('active', true);
+  const v = await rpc('quote_view', { p_rev: rv.id });
+  const { data: accs } = await sb.from('quote_acceptances').select('*').eq('quote_id', id).order('id');
+  const owner = window.__me.is_owner, editable = ['draft','returned'].includes(rv.status) || (owner && rv.status === 'internal_review');
+  const d = $('quote-detail'); d.classList.remove('hidden');
+  const t = v.totals || {}, ck = v.check || {};
+  d.innerHTML = `<p><strong>${esc(q.number)}</strong> rev ${rv.rev_no} · ${esc(q.kind)} · <span class="pill">${esc(rv.status.replace(/_/g, ' '))}</span> · rep ${esc(memberNames[q.rep_member_id] || '')}${rv.review_note ? `<br><small>Terry: ${esc(rv.review_note)}</small>` : ''}${rv.sent_at ? `<br><small>Sent ${et(rv.sent_at)} to ${esc(rv.sent_to)} · valid until ${et(rv.expires_at)}</small>` : ''}</p>
+    <table><thead><tr><th>#</th><th>Description</th><th>Class</th><th>Qty</th><th>Unit</th><th>Amount</th><th></th></tr></thead><tbody>${(lines || []).map(l => `<tr><td>${l.line_no}</td><td>${esc(l.description)}${l.override_kind ? ` <span class="pill invited">${l.override_kind}</span>` : ''}${l.equipment_source ? ` <small>(${l.equipment_source.replace('_', ' ')})</small>` : ''}</td><td>${esc(l.classification || '?')}</td><td>${l.qty}</td><td>${l.unit_price_cents == null ? '<span class="pill failed">Terry to price</span>' : money(l.unit_price_cents)}${l.list_price_cents != null && l.unit_price_cents != null && l.list_price_cents !== l.unit_price_cents ? ` <small>(list ${money(l.list_price_cents)})</small>` : ''}</td><td>${l.unit_price_cents == null ? '' : money(Math.round(l.unit_price_cents * l.qty))}</td>
+      <td>${editable && l.source !== 'labor' ? `<button class="small secondary" data-propose="${l.id}">${owner ? 'Set price' : 'Propose price'}</button> <button class="small secondary" data-remove="${l.id}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table>
+    <p><strong>Subtotal ${money(t.subtotal_cents)}</strong> · tax: ${esc(t.tax || '')} · <strong>deposit ${money(t.deposit_cents)}</strong> (100 % equipment + 50 % labor) · balance after deposit ${money(t.balance_after_deposit_cents)}
+      ${v.projected_commission_cents != null ? `· your projected commission ${money(v.projected_commission_cents)} (${v.commission_rate_pct} %)` : ''}</p>
+    <p>Rule check: <span class="pill ${ck.pass ? 'active' : 'failed'}">${ck.pass ? 'passes G1 — can be sent' : 'needs Terry'}</span> ${(ck.why || []).map(w => `<span class="pill">${esc(w)}</span>`).join(' ')} · margin ${ck.margin_pass ? '<span class="pill active">≥ 35 %</span>' : '<span class="pill failed">below 35 % or incomplete</span>'}
+      ${owner && t.margin ? `<br><small>Owner: margin ${t.margin.pct ?? '?'} % (cost ${money(t.margin.cost_cents)}, warranty ${money(t.margin.warranty_cents)}, fee ${money(t.margin.processing_fee_cents)})${t.margin.missing && t.margin.missing.length ? ' — missing: ' + esc(t.margin.missing.join('; ')) : ''}</small>` : ''}</p>
+    <p><small>Visits: ${rv.visits.length ? rv.visits.map(x => `#${x.visit_no}: ${x.hours} h, crew ${x.crew_size}`).join('; ') : 'none yet'}${rv.scope_summary ? ' · Scope: ' + esc(rv.scope_summary) : ''}</small></p>
+    <div>${editable ? `<label>Add from the price book</label><div class="row"><div><select id="ql-item">${(items || []).filter(i => i.classification).map(i => `<option value="${i.id}">${esc(i.name)}${i.variation ? ' — ' + esc(i.variation) : ''} (${money(i.price_cents)}, ${i.classification})</option>`).join('')}${(bundles || []).map(b => `<option value="bundle:${b.id}">Bundle: ${esc(b.name)}</option>`).join('')}</select></div><div><input id="ql-qty" type="number" step="0.01" value="1" placeholder="qty"></div><div><select id="ql-src"><option value="bought_for_job">bought for job</option><option value="inventory">from inventory</option></select></div></div>
+      <button class="small secondary" id="ql-add">Add line</button> <button class="small secondary" id="ql-visits">Set visits (hours & crew)</button> <button class="small secondary" id="ql-text">Scope / notes</button> <button class="small secondary" id="ql-custom">${owner ? 'Add custom line' : 'Propose custom line'}</button>
+      <button class="small" id="ql-submit">Submit for rule check</button>` : ''}
+      ${owner && rv.status === 'internal_review' ? `<button class="small" id="ql-approve">Approve</button> <button class="small secondary" id="ql-return">Return with note</button>` : ''}
+      ${rv.status === 'approved' ? `<button class="small" id="ql-send">Send to customer (email link)</button>` : ''}
+      ${rv.status === 'sent' ? `<button class="small secondary" id="ql-link">Fresh link</button> <button class="small secondary" id="ql-correct">Correct wording</button>` : ''}
+      ${['sent','approved','internal_review','expired','accepted'].includes(rv.status) ? `<button class="small secondary" id="ql-revise">New revision</button>` : ''}
+      ${owner && q.status === 'expired' && !q.price_reviewed_at ? `<button class="small secondary" id="ql-pricereview">Price review (expired)</button>` : ''}
+      ${['sent','approved'].includes(rv.status) ? `<button class="small secondary" id="ql-written">Record written acceptance</button>` : ''}
+      ${!['customer_accepted','cancelled'].includes(q.status) ? `<button class="small secondary" id="ql-cancel">Cancel quote</button>` : ''}
+    </div>
+    ${(accs || []).length ? `<h3 style="font-size:14px;margin:12px 0 4px">Acceptance</h3><table><tbody>${accs.map(a => `<tr><td><span class="pill ${a.status === 'accepted' ? 'active' : a.status === 'rejected' ? 'failed' : 'invited'}">${esc(a.status.replace('_', ' '))}</span></td><td>${esc(a.method.replace(/_/g, ' '))}</td><td>${a.accepted_at ? et(a.accepted_at) : ''}</td><td>${a.typed_name ? 'typed name: ' + esc(a.typed_name) + ' · ' : ''}${a.contact_email ? esc(a.contact_email) + ' · ' : ''}${a.reference ? esc(a.reference) + ' · ' : ''}${esc(a.auth_result || '')}${a.fingerprint ? ' · fingerprint ' + esc(a.fingerprint.slice(0, 12)) + '…' : ''}${a.verification_checked ? ' · Terry checked: ' + esc(a.verification_checked) : ''}</td></tr>`).join('')}</tbody></table>` : ''}
+    <div class="msg" id="q-msg"></div>`;
+  const done = async r => { msg('q-msg', r.ok ? (r.status ? 'Status: ' + r.status.replace(/_/g, ' ') + (r.check && r.check.why && r.check.why.length ? ' — ' + r.check.why.join('; ') : '') : 'Done.') : r.reason, r.ok); await loadQuotes(); openQuote(id); };
+  $('ql-add')?.addEventListener('click', async () => { const val = $('ql-item').value; const p = val.startsWith('bundle:') ? { bundle_id: val.slice(7) } : { item_id: val }; p.qty = parseFloat($('ql-qty').value || '1'); p.equipment_source = $('ql-src').value; done(await rpc('quote_line_set', { p_rev: rv.id, p_line: null, p })); });
+  $('ql-visits')?.addEventListener('click', async () => { const n = parseInt(prompt('How many visits?', String(rv.visits.length || 1)) || '0'); if (!n) return; const vs = []; for (let i = 1; i <= n; i++) { const h = parseFloat(prompt(`Visit ${i}: projected hours`, rv.visits[i - 1]?.hours || '') || '0'); const c = parseInt(prompt(`Visit ${i}: crew size (2 = tech + helper)`, rv.visits[i - 1]?.crew_size || '2') || '0'); vs.push({ visit_no: i, hours: h, crew_size: c }); } done(await rpc('quote_set_visits', { p_rev: rv.id, p_visits: vs })); });
+  $('ql-text')?.addEventListener('click', async () => { const sc = prompt('Scope summary (shown to the customer):', rv.scope_summary || ''); if (sc === null) return; const no = prompt('Notes to customer:', rv.notes_to_customer || ''); done(await rpc('quote_set_text', { p_rev: rv.id, p_scope: sc, p_notes: no })); });
+  $('ql-custom')?.addEventListener('click', async () => { const desc = prompt('Description:'); if (!desc) return; const cls = prompt('Class: ' + CLASSES.join(', '), 'materials'); const qty = parseFloat(prompt('Qty:', '1') || '1'); const price = prompt('Unit price ($) — blank = Terry to price:'); const p = { description: desc, classification: cls, qty, unit_price_cents: price ? Math.round(parseFloat(price) * 100) : null, equipment_source: 'bought_for_job' };
+    if (owner) done(await rpc('quote_line_set', { p_rev: rv.id, p_line: null, p })); else { const reason = prompt('Reason for Terry:'); if (!reason) return; done(await rpc('quote_change_request', { p_rev: rv.id, p_line: null, p_kind: 'custom', p: p, p_reason: reason })); } });
+  d.querySelectorAll('button[data-propose]').forEach(b => b.onclick = async () => { const l = lines.find(x => x.id === b.dataset.propose); const price = prompt(`New unit price ($) for "${l.description}" (list ${money(l.list_price_cents ?? l.unit_price_cents)}):`); if (!price) return; const cents = Math.round(parseFloat(price) * 100);
+    if (owner) done(await rpc('quote_line_set', { p_rev: rv.id, p_line: l.id, p: l.source === 'custom' ? { description: l.description, classification: l.classification, qty: l.qty, unit_price_cents: cents } : { item_id: l.item_id, qty: l.qty, equipment_source: l.equipment_source, unit_price_cents: cents } }));
+    else { const reason = prompt('Reason for Terry:'); if (!reason) return; done(await rpc('quote_change_request', { p_rev: rv.id, p_line: l.id, p_kind: cents < (l.list_price_cents ?? l.unit_price_cents) ? 'discount' : 'override', p: { unit_price_cents: cents }, p_reason: reason })); } });
+  d.querySelectorAll('button[data-remove]').forEach(b => b.onclick = async () => done(await rpc('quote_line_set', { p_rev: rv.id, p_line: b.dataset.remove, p: { remove: true } })));
+  $('ql-submit')?.addEventListener('click', async () => done(await rpc('quote_submit', { p_quote: id })));
+  $('ql-approve')?.addEventListener('click', async () => done(await rpc('quote_review', { p_quote: id, p_decision: 'approve', p_note: prompt('Note (optional):') || null })));
+  $('ql-return')?.addEventListener('click', async () => { const n = prompt('What should change?'); if (!n) return; done(await rpc('quote_review', { p_quote: id, p_decision: 'return', p_note: n })); });
+  $('ql-send')?.addEventListener('click', async () => { if (!confirm('Email the single-use quote link to the Square contact? (log-only mode: it lands in the Mail log)')) return; done(await rpc('quote_send', { p_quote: id })); });
+  $('ql-link')?.addEventListener('click', async () => done(await rpc('quote_link_reissue', { p_quote: id })));
+  $('ql-correct')?.addEventListener('click', async () => { const no = prompt('Corrected notes to customer (wording only; prices/lines need a new revision):', rv.notes_to_customer || ''); if (no === null) return; const reason = prompt('Reason:'); if (!reason) return; done(await rpc('quote_correct', { p_rev: rv.id, p_scope: null, p_notes: no, p_reason: reason })); });
+  $('ql-revise')?.addEventListener('click', async () => { const reason = prompt('Why a new revision?'); if (!reason) return; done(await rpc('quote_revise', { p_quote: id, p_reason: reason })); });
+  $('ql-pricereview')?.addEventListener('click', async () => done(await rpc('quote_price_review', { p_quote: id, p_note: prompt('Price review note:') || null })));
+  $('ql-cancel')?.addEventListener('click', async () => { const reason = prompt('Reason for cancelling:'); if (!reason) return; done(await rpc('quote_cancel', { p_quote: id, p_reason: reason })); });
+  $('ql-written')?.addEventListener('click', async () => { const m = prompt('Method: in_person_signed, returned_printed or reply_email', 'in_person_signed'); if (!m) return; const ref = prompt('What document is it and where is it kept? (it must name quote ' + q.number + ' revision ' + rv.rev_no + ')'); if (!ref) return; const notes = prompt('Notes (optional):') || null; done(await rpc('quote_written_acceptance_submit', { p_quote: id, p_rev_no: rv.rev_no, p_method: m.trim(), p_reference: ref, p_notes: notes })); });
+}
+
+sb.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') route();
+  if (event === 'PASSWORD_RECOVERY') { recovering = true; show('s-recover'); }
+  if (event === 'SIGNED_IN' && /[?&]code=/.test(location.search)) { // back from Google
+    history.replaceState(null, '', location.pathname);
+    setTimeout(async () => { try { await rpc('session_event', { p_event: 'signed_in', p_client: client() }); } catch (_) {} route(); }, 0);
+  }
+});
+route();
+</script>
+</body>
+</html>
