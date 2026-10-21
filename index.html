@@ -139,13 +139,14 @@
 
 
     <div class="card" id="tab-leads">
-      <h2>Leads <small style="font-weight:400;color:var(--muted)">(manual entry only in R1-Lite; a customer exists only once a lead qualifies)</small></h2>
+      <h2>Leads <small style="font-weight:400;color:var(--muted)">(website and Facebook inquiries arrive in the pool; a customer exists only once a lead qualifies)</small></h2>
       <div id="lead-pending" data-owner></div>
+      <div id="lead-pool"></div>
       <table><thead><tr><th>Name</th><th>Source</th><th>Need</th><th>Status</th><th>Owner</th><th>Follow-up</th><th></th></tr></thead><tbody id="leads-body"></tbody></table>
       <div id="lead-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
       <h2 style="margin-top:20px">Add a lead</h2>
       <div class="row">
-        <div><label>Source</label><select id="ld-source"><option value="phone">Phone call</option><option value="email">Email</option><option value="walk_in">Walk-in / in person</option><option value="referral">Referral</option><option value="website">Website (re-entered from the current Hub)</option><option value="facebook">Facebook (re-entered)</option><option value="other">Other</option><option value="terry_call" data-owner>Terry's own call</option></select></div>
+        <div><label>Source</label><select id="ld-source"><option value="phone">Phone call</option><option value="email">Email</option><option value="walk_in">Walk-in / in person</option><option value="referral">Referral</option><option value="website">Website (typed in by hand)</option><option value="facebook">Facebook (typed in by hand)</option><option value="other">Other</option><option value="terry_call" data-owner>Terry's own call</option></select></div>
         <div><label>Contact name</label><input id="ld-name"></div>
         <div><label>Town</label><input id="ld-town"></div>
       </div>
@@ -477,6 +478,10 @@ async function loadHealth() {
     ['auth_users', m.auth_users, lim.auth_users], ['members_active', m.members_active, ''], ['outbox_queued', m.outbox_queued, lim.outbox_queued], ['outbox_oldest_minutes', m.outbox_oldest_minutes, lim.outbox_oldest_minutes],
     ['outbox_failed', m.outbox_failed, ''], ['audit_rows', m.audit_rows, ''], ['email_log_rows', m.email_log_rows, ''], ['cron_failures (45 min)', (m.cron_failures || []).length, '0']];
   $('health-body').innerHTML = rows.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1] ?? '—')}</td><td>${esc(r[2] ?? '')}</td></tr>`).join('');
+  const it = await rpc('lead_intake_summary');
+  if (it.ok) $('health-summary').insertAdjacentHTML('beforeend', `<br><span class="pill">lead intake today: ${it.today_accepted} / ${it.daily_limit}</span> `
+    + Object.entries(it.last7).map(([k, v]) => `<span class="pill ${k === 'rate_limited' || k === 'held' ? 'failed' : ''}">7 days ${esc(k.replace('_', ' '))}: ${v}</span> `).join('')
+    + `<span class="pill ${it.pool_escalated ? 'failed' : ''}">pool: ${it.pool_open} open, ${it.pool_escalated} overdue</span>`);
   const bk = await rpc('backup_status');
   if (bk.ok) {
     const ls = bk.last_success, lf = bk.last_failure, lr = bk.last_restore_test;
@@ -588,6 +593,24 @@ async function loadLeads() {
   $('leads-body').innerHTML = (data || []).map(l => `<tr><td>${esc(l.contact_name)}${l.test_flag !== 'none' ? ` <span class="pill ${l.test_flag === 'clear' ? '' : 'invited'}">${l.test_flag === 'clear' ? 'TEST' : 'test?'}</span>` : ''}</td><td>${esc(l.source)}</td><td>${esc(l.need)}</td><td><span class="pill ${l.status === 'won' ? 'active' : l.status === 'lost' ? 'failed' : ''}">${LEAD_STATUS[l.status]}</span>${l.qualified_at ? ' <span class="pill active">qualified</span>' : ''}</td><td>${esc(memberNames[l.owner_member_id] || '')}</td><td>${l.next_follow_up || ''}</td><td><button class="small secondary" data-lead="${l.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="7">No leads yet.</td></tr>';
   $('leads-body').querySelectorAll('button[data-lead]').forEach(b => b.onclick = () => openLead(data.find(x => x.id === b.dataset.lead)));
   if (window.__me.is_owner) loadLeadPending();
+  loadPool();
+}
+const ago = t => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; };
+async function loadPool() {
+  let r; try { r = await rpc('lead_pool'); } catch (e) { $('lead-pool').innerHTML = ''; return; }
+  if (!r.ok) { $('lead-pool').innerHTML = ''; return; }
+  const owner = window.__me.is_owner; const reps = owner ? (await loadNames()) : [];
+  const rows = r.leads.map(l => `<tr><td>${esc(l.town || '—')}</td><td>${esc(l.need)}${owner ? `<br><small>${esc(l.contact_name)} · ${esc(l.contact_phone || '')} ${esc(l.contact_email || '')}</small>` : ''}</td><td>${esc(l.source)}</td>
+    <td>${ago(l.pool_since)}${l.escalated ? ' <span class="pill failed">overdue</span>' : ''}</td>
+    <td><button class="small" data-grab="${l.id}">Grab it</button>${owner ? ` <select data-assign="${l.id}"><option value="">Assign to…</option>${reps.map(m => `<option value="${m.id}">${esc(m.display_name)}</option>`).join('')}</select>` : ''}</td></tr>`).join('');
+  $('lead-pool').innerHTML = `<div class="banner" style="background:#fff;border-color:#fdba74"><strong>Up for grabs (${r.leads.length})</strong> <small style="color:var(--muted)">first to grab it owns it · unclaimed after ${r.escalate_hours} h goes to Terry${owner ? '' : ' · you see the customer\'s details once you grab it'}</small>
+    ${r.leads.length ? `<table><thead><tr><th>Town</th><th>Need</th><th>Source</th><th>Waiting</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<p style="margin:6px 0 0">Nothing in the pool right now.</p>'}<div class="msg" id="pool-msg"></div></div>`;
+  $('lead-pool').querySelectorAll('button[data-grab]').forEach(b => b.onclick = async () => {
+    const x = await rpc('lead_claim', { p_lead: b.dataset.grab }); msg('pool-msg', x.ok ? 'It\'s yours — it is now in your leads below.' : (x.reason === 'already taken' ? 'Someone grabbed it first.' : x.reason), x.ok);
+    await loadLeads(); if (x.ok) { const { data } = await sb.from('leads').select('*').eq('id', b.dataset.grab).single(); if (data) openLead(data); } });
+  $('lead-pool').querySelectorAll('select[data-assign]').forEach(sel => sel.onchange = async () => {
+    if (!sel.value) return; const x = await rpc('lead_assign', { p_lead: sel.dataset.assign, p_member: sel.value });
+    msg('pool-msg', x.ok ? 'Assigned.' : x.reason, x.ok); loadLeads(); });
 }
 async function openLead(l) {
   const { data: acts } = await sb.from('lead_activities').select('*').eq('lead_id', l.id).order('at', { ascending: false });
@@ -601,7 +624,8 @@ async function openLead(l) {
       ${next.map(n => `<button class="small secondary" data-status="${n}">→ ${LEAD_STATUS[n]}</button>`).join(' ')}
       ${l.qualified_at ? '<button class="small secondary" data-status="won">→ Won</button>' : '<button class="small" data-act="qualify">Qualify (creates the customer)</button>'}
       <button class="small secondary" data-status="lost">→ Lost</button>
-      <button class="small secondary" data-act="reassign">Reassign…</button>` : ''}
+      <button class="small secondary" data-act="reassign">Reassign…</button>
+      ${l.owner_member_id === window.__me.member?.id && !l.qualified_at && !l.pool ? '<button class="small secondary" data-act="release">Give back to the pool…</button>' : ''}` : ''}
       ${window.__me.is_owner && l.test_flag === 'ambiguous' ? `<button class="small secondary" data-test="none">Not a test</button> <button class="small secondary" data-test="clear">It is a test</button>` : ''}</div>
     <table style="margin-top:10px"><thead><tr><th>When (ET)</th><th>Who</th><th>Kind</th><th>Notes</th><th>Follow-up</th></tr></thead><tbody>${(acts || []).map(a => `<tr><td>${et(a.at)}</td><td>${esc(memberNames[a.member_id] || '')}</td><td>${esc(a.kind)}</td><td>${esc(a.notes || '')}</td><td>${a.next_follow_up || ''}</td></tr>`).join('')}</tbody></table>
     <div class="msg" id="lead-msg"></div>`;
@@ -639,6 +663,10 @@ async function openLead(l) {
     const r = await rpc('lead_reassign_request', { p_lead: l.id, p_to: to.id, p_reason: reason });
     if (r.ok && r.pending) r.reason = 'Request sent to Terry for approval.';
     done(r);
+  });
+  d.querySelector('[data-act="release"]')?.addEventListener('click', async () => {
+    const reason = prompt('Why are you giving this lead back? (required)'); if (!reason) return;
+    done(await rpc('lead_release', { p_lead: l.id, p_reason: reason })); d.classList.add('hidden');
   });
   d.querySelector('a[data-cust]')?.addEventListener('click', e => { e.preventDefault(); document.querySelector('.tabs [data-tab="customers"]').click(); setTimeout(() => openCustomer(e.target.dataset.cust), 300); });
 }
