@@ -265,13 +265,17 @@
       <div id="mj-pool"></div>
       <div id="mj-list"></div>
       <div id="mj-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:18px">My calendar</h2><div id="mj-cal"></div>
+      <h2 style="margin-top:18px">My time off</h2><div id="mj-off"></div>
       <h2 style="margin-top:18px">My hours</h2><div id="mj-hours"></div>
     </div>
 
     <div class="card hidden" id="tab-schedule">
       <h2>Schedule <small style="font-weight:400;color:var(--muted)">(site surveys, installs and service calls; techs grab from the pool or you assign)</small></h2>
       <div id="sc-pool"></div>
-      <table><thead><tr><th>Date</th><th>Kind</th><th>Customer</th><th>Tech</th><th>Status</th><th></th></tr></thead><tbody id="sc-body"></tbody></table>
+      <div id="sc-cal"></div>
+      <details style="margin:8px 0"><summary>List view</summary>
+      <table><thead><tr><th>Date</th><th>Kind</th><th>Customer</th><th>Tech</th><th>Status</th><th></th></tr></thead><tbody id="sc-body"></tbody></table></details>
       <div id="sc-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
       <h2 style="margin-top:18px">Schedule a visit</h2>
       <div class="row">
@@ -292,6 +296,7 @@
       </div>
       <label>Instructions for the tech (access, what to bring — never passwords)</label><textarea id="sc-instr" rows="2"></textarea>
       <button id="sc-go">Schedule it</button> <span class="msg" id="sc-msg"></span>
+      <h2 style="margin-top:18px">Technicians' time off</h2><div id="sc-off"></div>
       <h2 style="margin-top:18px">Technician pay rates and hours</h2>
       <div id="sc-rates"></div>
     </div>
@@ -854,6 +859,7 @@ async function loadMyJobs() {
   const up = mine.filter(v => v.status !== 'done' || v.back_home_at == null || v.visit_date >= today);
   $('mj-list').innerHTML = `<table><thead><tr><th>Date</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody>${up.map(v => `<tr><td>${fmtDate(v.visit_date)} ${fmtTime(v.start_time)}</td><td>${KIND[v.kind]}</td><td>${VSTAT[v.status]}${v.status === 'done' && !v.back_home_at ? ' — tap Back home' : ''}</td><td><button class="small secondary" data-openv="${v.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="4">No jobs on your list yet.</td></tr>'}</tbody></table>`;
   $('mj-list').querySelectorAll('[data-openv]').forEach(b => b.onclick = () => openVisit(b.dataset.openv, 'mj-detail'));
+  renderCalendar('mj-cal', 'mj-detail'); renderTimeOff('mj-off', false);
   const from = new Date(Date.now() - 13 * 864e5).toLocaleDateString('en-CA'), to = new Date(Date.now() + 864e5).toLocaleDateString('en-CA');
   const h = await rpc('tech_hours', { p_from: from, p_to: to });
   $('mj-hours').innerHTML = h.ok ? (h.rows.filter(r => r.tech_member_id === window.__me.member.id).map(r => `<p>Last 14 days: <strong>${r.paid_hours} paid hours</strong> over ${r.visits} visit(s) (left home → back home).</p>`).join('') || '<p>No finished visits in the last 14 days.</p>') : '';
@@ -869,7 +875,9 @@ async function openVisit(id, target) {
     ${r.contact?.name ? `Contact: ${esc(r.contact.name)} ${r.contact.phone ? `<a href="tel:${esc(r.contact.phone)}">${esc(r.contact.phone)}</a>` : ''} ${esc(r.contact.email || '')}` : ''}</p>
     ${v.instructions ? `<div class="banner" style="background:#fffbeb;border-color:#fde68a"><strong>From Terry:</strong> ${esc(v.instructions)}</div>` : ''}
     ${r.scope ? `<p><strong>Scope:</strong> ${esc(r.scope)}</p>` : ''}
-    ${r.equipment.length ? `<p><strong>Equipment for this job:</strong></p><ul>${r.equipment.map(e => `<li>${esc(e.item)} × ${e.qty}</li>`).join('')}</ul>` : ''}
+    ${r.equipment.length ? `<p><strong>Parts for this job</strong> <small style="color:var(--muted)">— tick each one when it's in your truck; Equipment checked unlocks when every piece of equipment is ticked</small></p>
+      <table><thead><tr><th>Picked up</th><th>Item</th><th>Qty</th><th>Installed</th><th>Went back</th></tr></thead><tbody>${r.equipment.map(e => `<tr><td><input type="checkbox" style="width:auto" data-pick="${e.line_id}" ${e.picked_up_at ? 'checked' : ''} ${(mine || owner) && !v.left_home_at ? '' : 'disabled'}></td><td>${esc(e.item)} <small style="color:var(--muted)">${esc(e.classification)}</small></td><td>${e.qty}</td>
+        <td><input type="number" step="1" min="0" style="width:70px" data-inst="${e.line_id}" value="${e.installed_qty ?? ''}" ${(mine || owner) ? '' : 'disabled'}></td><td><input type="number" step="1" min="0" style="width:70px" data-ret="${e.line_id}" value="${e.returned_qty ?? ''}" ${(mine || owner) ? '' : 'disabled'}></td></tr>`).join('')}</tbody></table>` : ''}
     ${r.guides.length ? `<p><strong>Guides:</strong> ${r.guides.map(g => `<a href="#" data-guide="${esc(g.id)}">${esc(g.title)}</a>`).join(' · ')}</p>` : ''}
     <div class="stampbar"><strong>Your day:</strong><br>
       ${st('Equipment checked', v.equipment_checked_at, 'equipment_checked', true)} →
@@ -878,6 +886,12 @@ async function openVisit(id, target) {
       ${st('Done on site', v.done_at, 'done', !!v.arrived_at)} →
       ${st('Back home', v.back_home_at, 'back_home', !!v.done_at)}</div>
     <p style="font-size:13px;color:var(--muted)">Paid from Leaving home to Back home${r.paid_hours != null ? `: <strong>${r.paid_hours} h</strong> so far` : ''}${r.on_site_hours != null ? ` · on site ${r.on_site_hours} h` : ''}${owner && r.rate_cents != null ? ` · rate ${money(r.rate_cents)}/h · pay ${money(r.pay_cents || 0)}` : ''}. Missing equipment? Don't leave — text Terry at 330-390-4023.</p>
+    <h3>Photos</h3><div id="vf-thumbs" style="display:flex;flex-wrap:wrap;gap:8px">${r.files.filter(f => f.kind !== 'signature').map(f => `<figure style="margin:0;width:130px"><a data-path="${esc(f.path)}" href="#"><img data-thumb="${esc(f.path)}" alt="" style="width:130px;height:98px;object-fit:cover;border-radius:6px;background:#eee"></a><figcaption style="font-size:12px;color:var(--muted)">${esc(f.kind)}${f.caption ? ' · ' + esc(f.caption) : ''}</figcaption></figure>`).join('') || '<span style="color:var(--muted)">No photos yet.</span>'}</div>
+    ${(mine || owner) && v.status !== 'cancelled' ? `<div class="row" style="margin-top:6px"><div><label>Photo of</label><select id="vf-kind"><option value="arrival">Arrival (front of the property)</option><option value="location">A mount location</option><option value="install" selected>Finished install</option><option value="parts">Parts / labels</option><option value="other">Other</option></select></div>
+      <div><label>Caption (optional)</label><input id="vf-cap"></div><div><label>&nbsp;</label><input type="file" id="vf-file" accept="image/*" capture="environment"></div></div><div class="msg" id="vf-msg"></div>` : ''}
+    ${v.kind === 'install' ? `<h3>Customer sign-off</h3>${v.signed_at ? `<p class="done-stamp">✓ Signed by ${esc(v.signed_name)} ${et(v.signed_at)}</p>` : ((mine || owner) && v.arrived_at && !v.done_at ? `<p style="font-size:13px">Show them the system working, then have them sign with a finger and print their name.</p>
+      <canvas id="sig-pad" width="520" height="170" style="border:2px dashed var(--line);border-radius:8px;touch-action:none;max-width:100%;background:#fff"></canvas><br>
+      <button class="small secondary" id="sig-clear">Clear</button> <input id="sig-name" placeholder="Customer prints their name" style="width:240px"> <button class="small" id="sig-save">Save sign-off</button> <span class="msg" id="sig-msg"></span>` : '<p style="color:var(--muted)">Available on site after Arrived.</p>')}` : ''}
     <h3>Notes</h3>${r.notes.map(n => `<p><small>${esc(n.by)} · ${et(n.at)}</small><br>${esc(n.notes)}</p>`).join('') || '<p style="color:var(--muted)">No notes yet.</p>'}
     ${(mine || owner) && v.status !== 'cancelled' ? `<textarea id="vn-text" rows="2" placeholder="Anything the customer asked for, anything left to do, anything Terry should know (never passwords)"></textarea><button class="small secondary" id="vn-add">Add note</button>` : ''}
     ${mine && v.status === 'scheduled' && !v.left_home_at ? ' <button class="small secondary" id="v-release">Give this job back…</button>' : ''}
@@ -888,6 +902,31 @@ async function openVisit(id, target) {
     reload(await rpc('visit_stamp', { p_visit: id, p_event: b.dataset.stamp, p_note: note })); });
   $('vn-add')?.addEventListener('click', async () => reload(await rpc('visit_note_add', { p_visit: id, p_notes: $('vn-text').value })));
   $('v-release')?.addEventListener('click', async () => { const reason = prompt('Why are you giving it back? (required)'); if (!reason) return; reload(await rpc('visit_release', { p_visit: id, p_reason: reason })); d.classList.add('hidden'); });
+  d.querySelectorAll('[data-pick]').forEach(c => c.onchange = async () => reload(await rpc('visit_part_set', { p_visit: id, p_line: c.dataset.pick, p: { picked_up: c.checked } })));
+  d.querySelectorAll('[data-inst],[data-ret]').forEach(c => c.onchange = async () => { const p = {}; p[c.dataset.inst ? 'installed_qty' : 'returned_qty'] = c.value === '' ? null : +c.value;
+    const x = await rpc('visit_part_set', { p_visit: id, p_line: c.dataset.inst || c.dataset.ret, p }); msg('v-msg', x.ok ? 'Saved.' : x.reason, x.ok); });
+  d.querySelectorAll('img[data-thumb]').forEach(async img => { const { data } = await sb.storage.from('job-files').createSignedUrl(img.dataset.thumb, 3600); if (data) { img.src = data.signedUrl; img.parentElement.href = data.signedUrl; img.parentElement.target = '_blank'; } });
+  $('vf-file')?.addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return; msg('vf-msg', 'Uploading…', true);
+    try { const blob = await shrinkImage(f); const path = `visits/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const up = await sb.storage.from('job-files').upload(path, blob, { contentType: 'image/jpeg', upsert: false }); if (up.error) throw up.error;
+      reload(await rpc('visit_file_add', { p_visit: id, p_path: path, p_kind: $('vf-kind').value, p_caption: $('vf-cap').value }));
+    } catch (err) { msg('vf-msg', 'Upload failed: ' + (err.message || err)); } });
+  const pad = $('sig-pad');
+  if (pad) {
+    const ctx = pad.getContext('2d'); ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.strokeStyle = '#111'; let drawing = false, inked = false;
+    const pos = ev => { const b = pad.getBoundingClientRect(); return [(ev.clientX - b.left) * pad.width / b.width, (ev.clientY - b.top) * pad.height / b.height]; };
+    pad.onpointerdown = ev => { drawing = true; inked = true; pad.setPointerCapture(ev.pointerId); const [x, y] = pos(ev); ctx.beginPath(); ctx.moveTo(x, y); };
+    pad.onpointermove = ev => { if (!drawing) return; const [x, y] = pos(ev); ctx.lineTo(x, y); ctx.stroke(); };
+    pad.onpointerup = () => { drawing = false; };
+    $('sig-clear').onclick = () => { ctx.clearRect(0, 0, pad.width, pad.height); inked = false; };
+    $('sig-save').onclick = async () => {
+      if (!inked) return msg('sig-msg', 'Have them sign first.'); if (!$('sig-name').value.trim()) return msg('sig-msg', 'Have them print their name.');
+      const blob = await new Promise(res => pad.toBlob(res, 'image/png')); const path = `visits/${id}/signature-${Date.now()}.png`;
+      const up = await sb.storage.from('job-files').upload(path, blob, { contentType: 'image/png' }); if (up.error) return msg('sig-msg', up.error.message);
+      const f = await rpc('visit_file_add', { p_visit: id, p_path: path, p_kind: 'signature', p_caption: 'Customer signature' }); if (!f.ok) return msg('sig-msg', f.reason);
+      reload(await rpc('visit_signoff', { p_visit: id, p_name: $('sig-name').value, p_path: path })); };
+  }
   d.querySelectorAll('a[data-guide]').forEach(a => a.onclick = async e => { e.preventDefault(); document.querySelector('.tabs [data-tab="guides"]').click(); setTimeout(() => openGuide(a.dataset.guide), 400); });
   if (owner && target === 'sc-detail' && !['done', 'cancelled'].includes(v.status)) {
     const techs = await techList();
@@ -900,6 +939,44 @@ async function openVisit(id, target) {
   }
 }
 
+async function shrinkImage(file) {
+  try { const bmp = await createImageBitmap(file); const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return await new Promise(res => c.toBlob(res, 'image/jpeg', 0.82)); } catch (_) { return file; }
+}
+// ----- calendar and time off (0020) -----
+let calStart = null;
+function weekStart(d) { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+const ymd = d => d.toLocaleDateString('en-CA');
+async function renderCalendar(targetId, openTarget) {
+  if (!calStart) calStart = weekStart(new Date());
+  const from = new Date(calStart), to = new Date(calStart); to.setDate(to.getDate() + 13);
+  const r = await rpc('calendar', { p_from: ymd(from), p_to: ymd(to) }); const el = $(targetId); if (!r.ok) { el.innerHTML = esc(r.reason); return; }
+  const days = [...Array(14)].map((_, i) => { const d = new Date(from); d.setDate(d.getDate() + i); return d; });
+  const today = ymd(new Date());
+  el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;margin:6px 0"><button class="small secondary" id="cal-prev">← 2 weeks</button><button class="small secondary" id="cal-today">This week</button><button class="small secondary" id="cal-next">2 weeks →</button>
+    <small style="color:var(--muted)">orange = in the pool · grey = time off</small></div>
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${days.map(d => { const k = ymd(d);
+      const vs = r.visits.filter(v => v.date === k), off = r.time_off.filter(t => k >= t.from && k <= t.to);
+      return `<div style="border:1px solid ${k === today ? 'var(--orange)' : 'var(--line)'};border-radius:6px;padding:4px;min-height:84px;font-size:12px;background:#fff">
+        <b>${d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}</b>
+        ${off.map(t => `<div style="background:#f3f4f6;border-radius:4px;padding:2px 4px;margin-top:3px;color:var(--muted)">${esc(t.member)} off</div>`).join('')}
+        ${vs.map(v => `<a href="#" data-calv="${v.id}" data-pool="${v.pool}" style="display:block;text-decoration:none;color:inherit;background:${v.pool ? '#ffedd5' : v.status === 'done' ? '#dcfce7' : '#eef2ff'};border-radius:4px;padding:2px 4px;margin-top:3px">${fmtTime(v.time)} ${KIND[v.kind]}<br>${esc(v.customer || v.town)}${v.tech && !v.pool ? ' · ' + esc(v.tech) : ''}</a>`).join('')}</div>`; }).join('')}</div>`;
+  $('cal-prev').onclick = () => { calStart.setDate(calStart.getDate() - 14); renderCalendar(targetId, openTarget); };
+  $('cal-next').onclick = () => { calStart.setDate(calStart.getDate() + 14); renderCalendar(targetId, openTarget); };
+  $('cal-today').onclick = () => { calStart = weekStart(new Date()); renderCalendar(targetId, openTarget); };
+  el.querySelectorAll('[data-calv]').forEach(a => a.onclick = e => { e.preventDefault(); if (a.dataset.pool === 'true' && !window.__me.is_owner) return; openVisit(a.dataset.calv, openTarget); });
+}
+async function renderTimeOff(targetId, forOwner) {
+  const { data } = await sb.from('time_off').select('*').gte('to_date', ymd(new Date())).order('from_date');
+  await loadNames();
+  $(targetId).innerHTML = `${(data || []).map(t => `<div>${forOwner ? esc(memberNames[t.member_id] || '') + ': ' : ''}${fmtDate(t.from_date)}${t.to_date !== t.from_date ? ' – ' + fmtDate(t.to_date) : ''} ${t.note ? '(' + esc(t.note) + ')' : ''} <button class="small secondary" data-deloff="${t.id}">Remove</button></div>`).join('') || '<p style="color:var(--muted)">No time off coming up.</p>'}
+    ${forOwner ? '' : `<div class="row" style="margin-top:6px"><div><label>From</label><input type="date" id="to-from"></div><div><label>To</label><input type="date" id="to-to"></div><div><label>Note (optional)</label><input id="to-note"></div></div><button class="small" id="to-add">Add time off</button>`}
+    <div class="msg" id="to-msg"></div>`;
+  $(targetId).querySelectorAll('[data-deloff]').forEach(b => b.onclick = async () => { const r = await rpc('time_off_delete', { p_id: +b.dataset.deloff }); msg('to-msg', r.ok ? 'Removed.' : r.reason, r.ok); renderTimeOff(targetId, forOwner); });
+  $('to-add')?.addEventListener('click', async () => { const r = await rpc('time_off_set', { p_member: null, p_from: $('to-from').value || null, p_to: $('to-to').value || $('to-from').value || null, p_note: $('to-note').value });
+    msg('to-msg', r.ok ? (r.conflicts ? `Saved. Heads up: you already have ${r.conflicts} job(s) on those days — tell Terry.` : 'Saved. You won\'t be offered jobs on those days.') : r.reason, r.ok); if (r.ok) renderTimeOff(targetId, forOwner); });
+}
 // ----- Terry: Schedule (0019) -----
 async function techList() {
   const { data: roles } = await sb.from('member_roles').select('member_id,role').eq('role', 'technician');
@@ -918,6 +995,7 @@ async function loadSchedule(keepDetail) {
   $('sc-body').innerHTML = (vis || []).map(v => `<tr><td>${fmtDate(v.visit_date)} ${fmtTime(v.start_time)}</td><td>${KIND[v.kind]}</td><td>${esc(cn[v.customer_id] || '')}</td><td>${v.pool ? '<span class="pill invited">pool</span>' : esc(memberNames[v.tech_member_id] || '')}</td><td>${VSTAT[v.status]}</td><td><button class="small secondary" data-openv="${v.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">Nothing scheduled yet.</td></tr>';
   $('sc-body').querySelectorAll('[data-openv]').forEach(b => b.onclick = () => openVisit(b.dataset.openv, 'sc-detail'));
   if (!keepDetail) $('sc-detail').classList.add('hidden');
+  renderCalendar('sc-cal', 'sc-detail'); renderTimeOff('sc-off', true);
   const cur = $('sc-cust').value;
   $('sc-cust').innerHTML = '<option value="">— customer —</option>' + (custs || []).map(c => `<option value="${c.id}">${esc(c.display_name)}</option>`).join('');
   if (cur) $('sc-cust').value = cur;
@@ -948,7 +1026,8 @@ $('sc-go').onclick = async () => {
     time: $('sc-time').value, hours: +$('sc-hours').value || 2, crew: +$('sc-crew').value || 1, instructions: $('sc-instr').value,
     guide_ids: [...$('sc-guides').selectedOptions].map(o => o.value) };
   if (t === '__pool') p.pool = true; else p.tech_member_id = t;
-  const r = await rpc('visit_create', { p }); msg('sc-msg', r.ok ? (r.pool ? 'Scheduled and put in the tech pool.' : 'Scheduled.') : r.reason, r.ok);
+  let r; try { r = await rpc('visit_create', { p }); } catch (e) { return msg('sc-msg', e.message); }
+  msg('sc-msg', r.ok ? (r.pool ? 'Scheduled and put in the tech pool.' : 'Scheduled.') : r.reason, r.ok);
   if (r.ok) { $('sc-instr').value = ''; loadSchedule(); }
 };
 
