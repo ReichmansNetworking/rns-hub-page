@@ -224,8 +224,9 @@
     </div>
 
     <div class="card hidden" id="tab-invitations">
-      <h2>Invitations</h2>
+      <h2>Invitations <label style="display:inline;font-size:13px;font-weight:400;margin-left:10px"><input type="checkbox" id="inv-all" style="width:auto"> show cancelled / used / expired</label></h2>
       <table><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th></th></tr></thead><tbody id="inv-body"></tbody></table>
+      <div class="msg" id="inv-list-msg"></div>
     </div>
 
     <div class="card hidden" id="tab-outbox">
@@ -607,13 +608,24 @@ $('inv-go').onclick = async () => {
 async function loadInvitations() {
   const { data, error } = await sb.from('invitations').select('id,email,role,status,expires_at,created_at').order('created_at', { ascending: false });
   if (error) return;
-  $('inv-body').innerHTML = (data || []).map(i => `<tr><td>${esc(i.email)}</td><td>${esc(i.role)}</td><td><span class="pill ${i.status === 'pending' ? 'invited' : ''}">${i.status}</span></td><td>${et(i.expires_at)}</td><td>${i.status === 'pending' ? `<button class="small secondary" data-act="replace" data-id="${i.id}">Re-send</button> <button class="small secondary" data-act="cancel" data-id="${i.id}">Cancel</button>` : ''}</td></tr>`).join('');
-  $('inv-body').querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => {
-    const reason = prompt('Reason (recorded in the audit log):'); if (!reason) return;
-    const r = await rpc(b.dataset.act === 'replace' ? 'invitation_replace' : 'invitation_cancel', { p_invitation: b.dataset.id, p_reason: reason });
-    if (!r.ok) alert(r.reason); loadInvitations();
-  });
+  const ROLE = { sales_rep: 'Sales rep', technician: 'Technician', owner: 'Owner' };
+  const rows = (data || []).filter(i => $('inv-all').checked || i.status === 'pending');
+  $('inv-body').innerHTML = rows.map(i => `<tr><td>${esc(i.email)}</td><td>${esc(ROLE[i.role] || i.role)}</td><td><span class="pill ${i.status === 'pending' ? 'invited' : ''}">${i.status}</span></td><td>${et(i.expires_at)}</td>
+    <td>${i.status === 'pending' ? `<button class="small secondary" data-act="replace" data-id="${i.id}">Send a new link</button> <button class="small" data-act="cancel" data-id="${i.id}" style="background:var(--bad)">Cancel invitation</button>
+      <div class="hidden" id="inv-ask-${i.id}" style="margin-top:6px"><input id="inv-why-${i.id}" placeholder="Reason (kept in the audit log)" style="width:260px"> <button class="small" data-go="${i.id}">Confirm</button></div>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="5">No open invitations.</td></tr>';
+  $('inv-body').querySelectorAll('button[data-act]').forEach(b => b.onclick = () => {
+    const box = $('inv-ask-' + b.dataset.id); box.classList.remove('hidden'); box.dataset.act = b.dataset.act;
+    $('inv-why-' + b.dataset.id).value = b.dataset.act === 'cancel' ? 'Sent by mistake' : 'New link requested';
+    box.querySelector('button').textContent = b.dataset.act === 'cancel' ? 'Confirm cancel' : 'Confirm new link'; $('inv-why-' + b.dataset.id).focus(); });
+  $('inv-body').querySelectorAll('button[data-go]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.go, act = $('inv-ask-' + id).dataset.act, reason = $('inv-why-' + id).value.trim();
+    if (!reason) return msg('inv-list-msg', 'Type a reason first.');
+    const r = await rpc(act === 'replace' ? 'invitation_replace' : 'invitation_cancel', { p_invitation: id, p_reason: reason });
+    msg('inv-list-msg', r.ok ? (act === 'cancel' ? 'Invitation cancelled — the link no longer works.' : 'New link made — copy it from the Mail log tab.') : r.reason, r.ok);
+    loadInvitations(); });
 }
+$('inv-all').onchange = () => loadInvitations();
 async function loadOutbox() {
   const { data, error } = await sb.from('outbox').select('id,event,recipient,status,not_before,attempts,last_error').order('id', { ascending: false }).limit(100);
   if (error) { $('outbox-body').innerHTML = `<tr><td colspan="7">${esc(error.message)}</td></tr>`; return; }
