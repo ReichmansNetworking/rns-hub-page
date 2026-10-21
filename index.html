@@ -13,6 +13,11 @@
 <style>
   :root { --orange:#e8650f; --orange-dark:#c4530a; --ink:#1f2328; --muted:#6b7280; --line:#e5e7eb; --bg:#fafaf9; --card:#fff; --ok:#15803d; --bad:#b91c1c; }
   * { box-sizing:border-box; }
+  .md h1,.md h2{font-size:18px;margin:18px 0 6px} .md h3{font-size:16px;margin:14px 0 4px} .md p{margin:6px 0} .md ul,.md ol{margin:6px 0;padding-left:22px} .md li{margin:3px 0}
+  .md blockquote{margin:8px 0;padding:8px 12px;border-left:4px solid var(--orange);background:#fff7ed;border-radius:6px} .md table{margin:8px 0} .md code{background:#f3f4f6;padding:1px 4px;border-radius:4px}
+  .glist{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))} .gcard{all:unset;cursor:pointer;display:block;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+  .gcard:hover{border-color:var(--orange)} .gcard b{display:block} .gcard small{color:var(--muted)}
+  .stampbar button{margin:4px 6px 4px 0} .done-stamp{color:var(--ok);font-weight:600}
   body { margin:0; font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); }
   header { background:#fff; border-bottom:3px solid var(--orange); padding:12px 20px; display:flex; align-items:center; justify-content:space-between; }
   header h1 { font-size:18px; margin:0; } header h1 span { color:var(--orange); }
@@ -123,9 +128,12 @@
   <!-- Owner screen -->
   <section id="s-owner" class="hidden">
     <div class="tabs">
-      <button data-tab="leads" class="active">Leads</button>
-      <button data-tab="customers">Customers</button>
-      <button data-tab="quotes">Quotes</button>
+      <button data-tab="myjobs" data-tech>My jobs</button>
+      <button data-tab="leads" class="active" data-sales>Leads</button>
+      <button data-tab="customers" data-sales>Customers</button>
+      <button data-tab="quotes" data-sales>Quotes</button>
+      <button data-tab="schedule" data-owner>Schedule</button>
+      <button data-tab="guides">Guides</button>
       <button data-tab="pricebook" data-owner>Price book</button>
       <button data-tab="members" data-owner>Members</button>
       <button data-tab="invitations" data-owner>Invitations</button>
@@ -207,7 +215,7 @@
       <div class="row">
         <div><label>Name</label><input id="inv-name"></div>
         <div><label>Email</label><input id="inv-email" type="email"></div>
-        <div><label>Role</label><select id="inv-role"><option value="sales_rep">Sales rep</option><option value="owner">Owner</option></select></div>
+        <div><label>Role</label><select id="inv-role"><option value="sales_rep">Sales rep</option><option value="technician">Technician</option><option value="owner">Owner</option></select></div>
       </div>
       <label>Reason (recorded in the audit log)</label><input id="inv-reason" placeholder="e.g. new part-time sales rep">
       <button id="inv-go">Send invitation</button>
@@ -242,6 +250,49 @@
       <div class="row"><div><label>Event</label><select id="prev-event"></select></div></div>
       <button class="small secondary" id="prev-go">Preview</button>
       <div id="prev-view" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+    </div>
+
+    <div class="card hidden" id="tab-guides">
+      <h2>Guides <small style="font-weight:400;color:var(--muted)" id="g-sub"></small></h2>
+      <div class="row"><div><input id="g-q" placeholder="Search the guides"></div><div id="g-new-wrap" data-owner><button class="small" id="g-new">New guide</button></div></div>
+      <div id="g-list"></div>
+      <div id="g-view" class="hidden" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card hidden" id="tab-myjobs">
+      <h2>My jobs</h2>
+      <div id="mj-pool"></div>
+      <div id="mj-list"></div>
+      <div id="mj-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:18px">My hours</h2><div id="mj-hours"></div>
+    </div>
+
+    <div class="card hidden" id="tab-schedule">
+      <h2>Schedule <small style="font-weight:400;color:var(--muted)">(site surveys, installs and service calls; techs grab from the pool or you assign)</small></h2>
+      <div id="sc-pool"></div>
+      <table><thead><tr><th>Date</th><th>Kind</th><th>Customer</th><th>Tech</th><th>Status</th><th></th></tr></thead><tbody id="sc-body"></tbody></table>
+      <div id="sc-detail" class="hidden" style="margin-top:12px;border:1px solid #eee;border-radius:8px;padding:12px"></div>
+      <h2 style="margin-top:18px">Schedule a visit</h2>
+      <div class="row">
+        <div><label>Customer</label><select id="sc-cust"></select></div>
+        <div><label>Location</label><select id="sc-loc"></select></div>
+        <div><label>Job (optional)</label><select id="sc-job"></select></div>
+      </div>
+      <div class="row">
+        <div><label>Kind</label><select id="sc-kind"><option value="install">Install</option><option value="survey">Site survey</option><option value="service">Service call</option></select></div>
+        <div><label>Date</label><input id="sc-date" type="date"></div>
+        <div><label>Start time</label><input id="sc-time" type="time"></div>
+        <div><label>Hours</label><input id="sc-hours" type="number" step="0.5" value="4"></div>
+        <div><label>Crew</label><input id="sc-crew" type="number" value="1"></div>
+      </div>
+      <div class="row">
+        <div><label>Who</label><select id="sc-tech"></select></div>
+        <div><label>Guides for this job (Ctrl+click for several)</label><select id="sc-guides" multiple size="5"></select></div>
+      </div>
+      <label>Instructions for the tech (access, what to bring — never passwords)</label><textarea id="sc-instr" rows="2"></textarea>
+      <button id="sc-go">Schedule it</button> <span class="msg" id="sc-msg"></span>
+      <h2 style="margin-top:18px">Technician pay rates and hours</h2>
+      <div id="sc-rates"></div>
     </div>
 
     <div class="card hidden" id="tab-health">
@@ -309,9 +360,15 @@ async function route() {
     window.__factorId = verified.id;
     return show('s-mfa');
   }
-  if (me.is_owner || (me.member.roles || []).includes('sales_rep')) {
-    window.__me = me;
+  const roles = me.member.roles || [];
+  const isRep = roles.includes('sales_rep'), isTech = roles.includes('technician');
+  if (me.is_owner || isRep || isTech) {
+    window.__me = me; me.is_rep = isRep; me.is_tech = isTech;
     document.querySelectorAll('[data-owner]').forEach(e => e.classList.toggle('hidden', !me.is_owner));
+    document.querySelectorAll('[data-sales]').forEach(e => e.classList.toggle('hidden', !(me.is_owner || isRep)));
+    document.querySelectorAll('[data-tech]').forEach(e => e.classList.toggle('hidden', !isTech));
+    if (!me.is_owner && !isRep && ['leads','customers','quotes'].includes(currentTab)) currentTab = 'myjobs';
+    document.querySelectorAll('.tabs [data-tab]').forEach(x => x.classList.toggle('active', x.dataset.tab === currentTab));
     show('s-owner'); return loadTab(currentTab);
   }
   show('s-nomember');
@@ -450,7 +507,10 @@ document.querySelectorAll('.tabs [data-tab]').forEach(b => b.onclick = () => {
   currentTab = b.dataset.tab; loadTab(currentTab);
 });
 async function loadTab(tab) {
-  ['leads','customers','quotes','pricebook','members','invitations','outbox','audit','settings','mail','health'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  ['leads','customers','quotes','pricebook','members','invitations','outbox','audit','settings','mail','health','guides','myjobs','schedule'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== tab));
+  if (tab === 'guides') return loadGuides();
+  if (tab === 'myjobs') return loadMyJobs();
+  if (tab === 'schedule') return loadSchedule();
   if (tab === 'leads') return loadLeads();
   if (tab === 'quotes') return loadQuotes();
   if (tab === 'pricebook') return loadPriceBook();
@@ -695,6 +755,189 @@ $('ld-go').onclick = async () => {
   try { const r = await rpc('lead_create', { p }); msg('ld-msg', r.ok ? 'Lead added' + (r.test_flag === 'clear' ? ' (marked TEST: it will never reach Square).' : r.test_flag === 'ambiguous' ? ' (looks like it might be a test — Terry will check).' : '.') : r.reason, r.ok);
     if (r.ok) { ['ld-name','ld-phone','ld-email','ld-town','ld-need','ld-details','ld-orig','ld-claimed'].forEach(i => $(i).value = ''); loadLeads(); } }
   catch (e) { msg('ld-msg', e.message); }
+};
+
+// ----- guides (0019) -----
+function mdToHtml(md) {
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>').replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  const lines = String(md || '').split('\n'); let html = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^#{1,3} /.test(l)) { const n = l.match(/^#+/)[0].length; html += `<h${n + 1}>${inline(l.replace(/^#+ /, ''))}</h${n + 1}>`; i++; continue; }
+    if (/^> ?/.test(l)) { let b = []; while (i < lines.length && /^> ?/.test(lines[i])) b.push(lines[i++].replace(/^> ?/, '')); html += `<blockquote>${b.map(inline).join('<br>')}</blockquote>`; continue; }
+    if (/^\|/.test(l)) { let rows = []; while (i < lines.length && /^\|/.test(lines[i])) rows.push(lines[i++]); rows = rows.filter(r => !/^\|[\s|:-]+\|$/.test(r));
+      html += '<table>' + rows.map((r, k) => '<tr>' + r.replace(/^\||\|$/g, '').split('|').map(c => k ? `<td style="white-space:normal">${inline(c.trim())}</td>` : `<th>${inline(c.trim())}</th>`).join('') + '</tr>').join('') + '</table>'; continue; }
+    if (/^\s*(- |\d+\. )/.test(l)) {
+      const ordered = /^\s*\d+\. /.test(l); let items = [];
+      while (i < lines.length && /^\s*(- |\d+\. )/.test(lines[i])) { const sub = /^\s{2,}/.test(lines[i]); const t = lines[i].replace(/^\s*(- |\d+\. )/, '');
+        if (sub && items.length) items[items.length - 1].subs.push(t); else items.push({ t, subs: [] }); i++; }
+      html += (ordered ? '<ol>' : '<ul>') + items.map(it => `<li>${inline(it.t)}${it.subs.length ? '<ul>' + it.subs.map(x => `<li>${inline(x)}</li>`).join('') + '</ul>' : ''}</li>`).join('') + (ordered ? '</ol>' : '</ul>'); continue; }
+    if (l.trim() === '') { i++; continue; }
+    let para = []; while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,3} |> ?|\||\s*(- |\d+\. ))/.test(lines[i])) para.push(lines[i++]);
+    html += `<p>${para.map(inline).join('<br>')}</p>`;
+  }
+  return html;
+}
+let guideCache = [];
+const AUD = { sales: 'Sales', tech: 'Technicians', all: 'Everyone', owner: 'Terry only' };
+async function loadGuides() {
+  const me = window.__me;
+  $('g-sub').textContent = me.is_owner ? '(you see every guide; reps see sales guides, techs see install guides)' : me.is_tech && !me.is_rep ? '(install and job guides)' : '(sales guides)';
+  const { data, error } = await sb.from('guides').select('id,audience,category,title,summary,body_md,sort,active,updated_at').order('sort').order('title');
+  if (error) { $('g-list').innerHTML = esc(error.message); return; }
+  guideCache = data || []; renderGuideList();
+}
+function renderGuideList() {
+  const q = ($('g-q').value || '').toLowerCase();
+  const list = guideCache.filter(g => !q || (g.title + ' ' + g.summary + ' ' + g.body_md).toLowerCase().includes(q));
+  const cats = [...new Set(list.map(g => g.category))];
+  $('g-list').innerHTML = cats.map(c => `<h3 style="margin:14px 0 6px">${esc(c)}</h3><div class="glist">${list.filter(g => g.category === c).map(g => `<button class="gcard" data-g="${esc(g.id)}"><b>${esc(g.title)}</b><small>${esc(g.summary || '')}${window.__me.is_owner ? ` · ${AUD[g.audience]}${g.active ? '' : ' · hidden'}` : ''}</small></button>`).join('')}</div>`).join('') || '<p>No guides match.</p>';
+  $('g-list').querySelectorAll('[data-g]').forEach(b => b.onclick = () => openGuide(b.dataset.g));
+}
+$('g-q').oninput = () => renderGuideList();
+function openGuide(id) {
+  const g = guideCache.find(x => x.id === id); if (!g) return;
+  const v = $('g-view'); v.classList.remove('hidden'); $('g-list').classList.add('hidden');
+  v.innerHTML = `<button class="small secondary" id="g-back">← All guides</button> ${window.__me.is_owner ? '<button class="small secondary" id="g-edit">Edit</button>' : ''}
+    <h2 style="margin-top:10px">${esc(g.title)}</h2><div class="md">${mdToHtml(g.body_md)}</div>`;
+  $('g-back').onclick = () => { v.classList.add('hidden'); $('g-list').classList.remove('hidden'); };
+  $('g-edit')?.addEventListener('click', () => editGuide(g));
+  v.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function editGuide(g) {
+  g = g || { id: '', audience: 'tech', category: 'General', title: '', summary: '', body_md: '', sort: 500, active: true };
+  const v = $('g-view'); v.classList.remove('hidden'); $('g-list').classList.add('hidden');
+  v.innerHTML = `<button class="small secondary" id="g-back">← Cancel</button><h2>${g.id ? 'Edit guide' : 'New guide'}</h2>
+    <div class="row"><div><label>Title</label><input id="ge-title" value="${esc(g.title)}"></div><div><label>Section</label><input id="ge-cat" value="${esc(g.category)}"></div>
+    <div><label>Who sees it</label><select id="ge-aud">${Object.entries(AUD).map(([k, t]) => `<option value="${k}" ${k === g.audience ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div><label>Order</label><input id="ge-sort" type="number" value="${g.sort}"></div></div>
+    <label>One-line summary</label><input id="ge-sum" value="${esc(g.summary)}">
+    <label>Text <small>(## heading, - bullet, 1. step, **bold**, &gt; callout)</small></label><textarea id="ge-body" rows="18" style="font-family:ui-monospace,monospace;font-size:13px">${esc(g.body_md)}</textarea>
+    <label><input type="checkbox" id="ge-active" ${g.active ? 'checked' : ''} style="width:auto"> Show it</label>
+    <button id="ge-save">Save</button> <span class="msg" id="ge-msg"></span>`;
+  $('g-back').onclick = () => { v.classList.add('hidden'); $('g-list').classList.remove('hidden'); };
+  $('ge-save').onclick = async () => {
+    const r = await rpc('guide_set', { p: { id: g.id, title: $('ge-title').value, category: $('ge-cat').value, audience: $('ge-aud').value, sort: +$('ge-sort').value || 500,
+      summary: $('ge-sum').value, body_md: $('ge-body').value, active: $('ge-active').checked } });
+    msg('ge-msg', r.ok ? 'Saved.' : r.reason, r.ok); if (r.ok) { await loadGuides(); openGuide(r.id); }
+  };
+}
+$('g-new').onclick = () => editGuide(null);
+
+// ----- technicians: My jobs (0019) -----
+const KIND = { survey: 'Site survey', install: 'Install', service: 'Service call' };
+const VSTAT = { scheduled: 'Scheduled', en_route: 'On the way', on_site: 'On site', done: 'Done', cancelled: 'Cancelled' };
+const fmtDate = d => d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+const fmtTime = t => t ? new Date('2000-01-01T' + t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+async function loadMyJobs() {
+  const p = await rpc('visit_pool');
+  $('mj-pool').innerHTML = p.ok ? `<div class="banner" style="background:#fff;border-color:#fdba74"><strong>Jobs up for grabs (${p.visits.length})</strong> <small style="color:var(--muted)">first to grab it gets it · the address and customer show once it's yours</small>
+    ${p.visits.length ? `<table><thead><tr><th>Date</th><th>Kind</th><th>Town</th><th>Hours</th><th>Crew</th><th></th></tr></thead><tbody>${p.visits.map(v => `<tr><td>${fmtDate(v.date)} ${fmtTime(v.time)}</td><td>${KIND[v.kind]}</td><td>${esc(v.town)}</td><td>${v.hours}</td><td>${v.crew}</td><td><button class="small" data-grabv="${v.id}">Grab it</button></td></tr>`).join('')}</tbody></table>` : '<p style="margin:6px 0 0">Nothing up for grabs right now.</p>'}<div class="msg" id="mj-msg"></div></div>` : '';
+  $('mj-pool').querySelectorAll('[data-grabv]').forEach(b => b.onclick = async () => { const r = await rpc('visit_claim', { p_visit: b.dataset.grabv });
+    msg('mj-msg', r.ok ? 'It\'s yours.' : (r.reason === 'already taken' ? 'Someone grabbed it first.' : r.reason), r.ok); await loadMyJobs(); if (r.ok) openVisit(b.dataset.grabv, 'mj-detail'); });
+  const { data } = await sb.from('visits').select('*').neq('status', 'cancelled').order('visit_date').order('start_time');
+  const mine = (data || []).filter(v => v.tech_member_id === window.__me.member.id);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const up = mine.filter(v => v.status !== 'done' || v.back_home_at == null || v.visit_date >= today);
+  $('mj-list').innerHTML = `<table><thead><tr><th>Date</th><th>Kind</th><th>Status</th><th></th></tr></thead><tbody>${up.map(v => `<tr><td>${fmtDate(v.visit_date)} ${fmtTime(v.start_time)}</td><td>${KIND[v.kind]}</td><td>${VSTAT[v.status]}${v.status === 'done' && !v.back_home_at ? ' — tap Back home' : ''}</td><td><button class="small secondary" data-openv="${v.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="4">No jobs on your list yet.</td></tr>'}</tbody></table>`;
+  $('mj-list').querySelectorAll('[data-openv]').forEach(b => b.onclick = () => openVisit(b.dataset.openv, 'mj-detail'));
+  const from = new Date(Date.now() - 13 * 864e5).toLocaleDateString('en-CA'), to = new Date(Date.now() + 864e5).toLocaleDateString('en-CA');
+  const h = await rpc('tech_hours', { p_from: from, p_to: to });
+  $('mj-hours').innerHTML = h.ok ? (h.rows.filter(r => r.tech_member_id === window.__me.member.id).map(r => `<p>Last 14 days: <strong>${r.paid_hours} paid hours</strong> over ${r.visits} visit(s) (left home → back home).</p>`).join('') || '<p>No finished visits in the last 14 days.</p>') : '';
+}
+async function openVisit(id, target) {
+  const r = await rpc('visit_view', { p_visit: id }); const d = $(target); d.classList.remove('hidden');
+  if (!r.ok) { d.innerHTML = esc(r.reason); return; }
+  const v = r.visit, owner = window.__me.is_owner, mine = v.tech_member_id === window.__me.member.id;
+  const st = (lbl, at, ev, enabled) => at ? `<span class="done-stamp">✓ ${lbl} ${et(at)}</span>` : (enabled && (mine || owner) && v.status !== 'cancelled' ? `<button class="small" data-stamp="${ev}">${lbl}</button>` : `<span style="color:var(--muted)">${lbl}</span>`);
+  const maps = r.address ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(r.address)}` : '';
+  d.innerHTML = `<p><strong>${KIND[v.kind]} — ${esc(r.customer)}</strong> · ${fmtDate(v.visit_date)} ${fmtTime(v.start_time)} · about ${v.est_hours} h · crew ${v.crew_size} · ${esc(r.tech || 'in the pool')}<br>
+    ${esc(r.address || '')} ${maps ? `<a href="${maps}" target="_blank" rel="noopener">Directions</a>` : ''}<br>
+    ${r.contact?.name ? `Contact: ${esc(r.contact.name)} ${r.contact.phone ? `<a href="tel:${esc(r.contact.phone)}">${esc(r.contact.phone)}</a>` : ''} ${esc(r.contact.email || '')}` : ''}</p>
+    ${v.instructions ? `<div class="banner" style="background:#fffbeb;border-color:#fde68a"><strong>From Terry:</strong> ${esc(v.instructions)}</div>` : ''}
+    ${r.scope ? `<p><strong>Scope:</strong> ${esc(r.scope)}</p>` : ''}
+    ${r.equipment.length ? `<p><strong>Equipment for this job:</strong></p><ul>${r.equipment.map(e => `<li>${esc(e.item)} × ${e.qty}</li>`).join('')}</ul>` : ''}
+    ${r.guides.length ? `<p><strong>Guides:</strong> ${r.guides.map(g => `<a href="#" data-guide="${esc(g.id)}">${esc(g.title)}</a>`).join(' · ')}</p>` : ''}
+    <div class="stampbar"><strong>Your day:</strong><br>
+      ${st('Equipment checked', v.equipment_checked_at, 'equipment_checked', true)} →
+      ${st('Leaving home', v.left_home_at, 'left_home', !!v.equipment_checked_at)} →
+      ${st('Arrived', v.arrived_at, 'arrived', !!v.left_home_at)} →
+      ${st('Done on site', v.done_at, 'done', !!v.arrived_at)} →
+      ${st('Back home', v.back_home_at, 'back_home', !!v.done_at)}</div>
+    <p style="font-size:13px;color:var(--muted)">Paid from Leaving home to Back home${r.paid_hours != null ? `: <strong>${r.paid_hours} h</strong> so far` : ''}${r.on_site_hours != null ? ` · on site ${r.on_site_hours} h` : ''}${owner && r.rate_cents != null ? ` · rate ${money(r.rate_cents)}/h · pay ${money(r.pay_cents || 0)}` : ''}. Missing equipment? Don't leave — text Terry at 330-390-4023.</p>
+    <h3>Notes</h3>${r.notes.map(n => `<p><small>${esc(n.by)} · ${et(n.at)}</small><br>${esc(n.notes)}</p>`).join('') || '<p style="color:var(--muted)">No notes yet.</p>'}
+    ${(mine || owner) && v.status !== 'cancelled' ? `<textarea id="vn-text" rows="2" placeholder="Anything the customer asked for, anything left to do, anything Terry should know (never passwords)"></textarea><button class="small secondary" id="vn-add">Add note</button>` : ''}
+    ${mine && v.status === 'scheduled' && !v.left_home_at ? ' <button class="small secondary" id="v-release">Give this job back…</button>' : ''}
+    <div class="msg" id="v-msg"></div>`;
+  const reload = async (x) => { msg('v-msg', x.ok ? 'Saved.' : x.reason, x.ok); if (x.ok) { openVisit(id, target); if (target === 'mj-detail') loadMyJobs(); else loadSchedule(true); } };
+  d.querySelectorAll('[data-stamp]').forEach(b => b.onclick = async () => {
+    let note = null; if (b.dataset.stamp === 'done') note = prompt('Anything Terry should know? (optional)') || null;
+    reload(await rpc('visit_stamp', { p_visit: id, p_event: b.dataset.stamp, p_note: note })); });
+  $('vn-add')?.addEventListener('click', async () => reload(await rpc('visit_note_add', { p_visit: id, p_notes: $('vn-text').value })));
+  $('v-release')?.addEventListener('click', async () => { const reason = prompt('Why are you giving it back? (required)'); if (!reason) return; reload(await rpc('visit_release', { p_visit: id, p_reason: reason })); d.classList.add('hidden'); });
+  d.querySelectorAll('a[data-guide]').forEach(a => a.onclick = async e => { e.preventDefault(); document.querySelector('.tabs [data-tab="guides"]').click(); setTimeout(() => openGuide(a.dataset.guide), 400); });
+  if (owner && target === 'sc-detail' && !['done', 'cancelled'].includes(v.status)) {
+    const techs = await techList();
+    d.insertAdjacentHTML('beforeend', `<div style="margin-top:10px"><strong>Change:</strong> <select id="vu-tech"><option value="">— pick —</option><option value="__pool">Put in the tech pool</option>${techs.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>
+      <input id="vu-date" type="date" value="${v.visit_date}" style="width:auto"> <input id="vu-time" type="time" value="${(v.start_time || '').slice(0, 5)}" style="width:auto">
+      <button class="small secondary" id="vu-save">Save changes</button> <button class="small secondary" id="vu-cancel">Cancel visit…</button></div>`);
+    $('vu-save').onclick = async () => { const p = { date: $('vu-date').value, time: $('vu-time').value }; const t = $('vu-tech').value;
+      if (t === '__pool') p.pool = true; else if (t) p.tech_member_id = t; reload(await rpc('visit_update', { p_visit: id, p })); };
+    $('vu-cancel').onclick = async () => { const reason = prompt('Why is this visit cancelled?'); if (!reason) return; reload(await rpc('visit_update', { p_visit: id, p: { cancel_reason: reason } })); };
+  }
+}
+
+// ----- Terry: Schedule (0019) -----
+async function techList() {
+  const { data: roles } = await sb.from('member_roles').select('member_id,role').eq('role', 'technician');
+  await loadNames(); const ids = new Set((roles || []).map(r => r.member_id));
+  const list = Object.entries(memberNames).filter(([id]) => ids.has(id)).map(([id, name]) => ({ id, name }));
+  return [{ id: window.__me.member.id, name: 'Me (Terry)' }, ...list.filter(t => t.id !== window.__me.member.id)];
+}
+async function loadSchedule(keepDetail) {
+  const p = await rpc('visit_pool');
+  $('sc-pool').innerHTML = p.ok && p.visits.length ? `<div class="banner" style="background:#fff;border-color:#fdba74"><strong>In the tech pool (${p.visits.length})</strong> ${p.visits.map(v => `<br>${fmtDate(v.date)} ${fmtTime(v.time)} · ${KIND[v.kind]} · ${esc(v.customer || '')} (${esc(v.town)})`).join('')}</div>` : '';
+  await loadNames();
+  const [{ data: vis }, { data: custs }] = await Promise.all([
+    sb.from('visits').select('*').order('visit_date', { ascending: false }).limit(100),
+    sb.from('customers').select('id,display_name').eq('status', 'active').order('display_name')]);
+  const cn = {}; (custs || []).forEach(c => cn[c.id] = c.display_name);
+  $('sc-body').innerHTML = (vis || []).map(v => `<tr><td>${fmtDate(v.visit_date)} ${fmtTime(v.start_time)}</td><td>${KIND[v.kind]}</td><td>${esc(cn[v.customer_id] || '')}</td><td>${v.pool ? '<span class="pill invited">pool</span>' : esc(memberNames[v.tech_member_id] || '')}</td><td>${VSTAT[v.status]}</td><td><button class="small secondary" data-openv="${v.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">Nothing scheduled yet.</td></tr>';
+  $('sc-body').querySelectorAll('[data-openv]').forEach(b => b.onclick = () => openVisit(b.dataset.openv, 'sc-detail'));
+  if (!keepDetail) $('sc-detail').classList.add('hidden');
+  const cur = $('sc-cust').value;
+  $('sc-cust').innerHTML = '<option value="">— customer —</option>' + (custs || []).map(c => `<option value="${c.id}">${esc(c.display_name)}</option>`).join('');
+  if (cur) $('sc-cust').value = cur;
+  const techs = await techList();
+  $('sc-tech').innerHTML = '<option value="__pool">Put in the tech pool (first to grab)</option>' + techs.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  const { data: gs } = await sb.from('guides').select('id,title,audience').in('audience', ['tech', 'all', 'owner']).eq('active', true).order('sort');
+  $('sc-guides').innerHTML = (gs || []).map(g => `<option value="${esc(g.id)}">${esc(g.title)}</option>`).join('');
+  if (!$('sc-date').value) $('sc-date').value = new Date(Date.now() + 864e5).toLocaleDateString('en-CA');
+  // rates and hours
+  const { data: rates } = await sb.from('tech_rates').select('*');
+  const rn = {}; (rates || []).forEach(r => rn[r.member_id] = r.cents_per_hour);
+  const from = new Date(Date.now() - 13 * 864e5).toLocaleDateString('en-CA'), to = new Date(Date.now() + 864e5).toLocaleDateString('en-CA');
+  const h = await rpc('tech_hours', { p_from: from, p_to: to }); const hn = {}; (h.rows || []).forEach(r => hn[r.tech_member_id] = r);
+  const realTechs = techs.slice(1);
+  $('sc-rates').innerHTML = realTechs.length ? `<table><thead><tr><th>Technician</th><th>Rate ($/hour)</th><th>Last 14 days</th><th></th></tr></thead><tbody>${realTechs.map(t => `<tr><td>${esc(t.name)}</td><td><input type="number" step="0.5" style="width:110px" id="rate-${t.id}" value="${rn[t.id] != null ? (rn[t.id] / 100).toFixed(2) : ''}"></td><td>${hn[t.id] ? `${hn[t.id].paid_hours} h · ${money(hn[t.id].pay_cents || 0)}` : '—'}</td><td><button class="small secondary" data-rate="${t.id}">Save</button></td></tr>`).join('')}</tbody></table><div class="msg" id="rate-msg"></div>` : '<p>No technicians yet. Invite one from the Invitations tab with the Technician role.</p>';
+  $('sc-rates').querySelectorAll('[data-rate]').forEach(b => b.onclick = async () => { const r = await rpc('tech_rate_set', { p_member: b.dataset.rate, p_cents: Math.round(parseFloat($('rate-' + b.dataset.rate).value) * 100) }); msg('rate-msg', r.ok ? 'Rate saved.' : r.reason, r.ok); });
+}
+$('sc-cust').onchange = async () => {
+  const id = $('sc-cust').value; if (!id) { $('sc-loc').innerHTML = ''; $('sc-job').innerHTML = ''; return; }
+  const [{ data: locs }, { data: jobs }] = await Promise.all([sb.from('customer_locations').select('id,label,address_line1,city').eq('customer_id', id),
+    sb.from('jobs').select('id,status,created_at').eq('customer_id', id).order('created_at', { ascending: false })]);
+  $('sc-loc').innerHTML = (locs || []).map(l => `<option value="${l.id}">${esc(l.label)}: ${esc(l.address_line1 || '')} ${esc(l.city || '')}</option>`).join('');
+  $('sc-job').innerHTML = '<option value="">— none —</option>' + (jobs || []).map(j => `<option value="${j.id}">${esc(j.status)} job from ${new Date(j.created_at).toLocaleDateString()}</option>`).join('');
+};
+$('sc-go').onclick = async () => {
+  const t = $('sc-tech').value;
+  const p = { customer_id: $('sc-cust').value, location_id: $('sc-loc').value, job_id: $('sc-job').value || null, kind: $('sc-kind').value, date: $('sc-date').value,
+    time: $('sc-time').value, hours: +$('sc-hours').value || 2, crew: +$('sc-crew').value || 1, instructions: $('sc-instr').value,
+    guide_ids: [...$('sc-guides').selectedOptions].map(o => o.value) };
+  if (t === '__pool') p.pool = true; else p.tech_member_id = t;
+  const r = await rpc('visit_create', { p }); msg('sc-msg', r.ok ? (r.pool ? 'Scheduled and put in the tech pool.' : 'Scheduled.') : r.reason, r.ok);
+  if (r.ok) { $('sc-instr').value = ''; loadSchedule(); }
 };
 
 // ----- customers (R1L-22, R1L-24, R1L-25) -----
