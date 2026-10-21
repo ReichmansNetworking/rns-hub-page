@@ -46,11 +46,11 @@
 </head>
 <body>
 <header>
-  <h1><span>RNS</span> Hub <small style="font-weight:400;color:var(--muted)">R1-Lite · development</small></h1>
+  <h1><span>RNS</span> Hub <small style="font-weight:400;color:var(--muted)" id="env-tag"></small></h1>
   <div class="who" id="who"></div>
 </header>
 <main>
-  <div class="banner">Development environment — test data only. Nothing here is a real customer, job or payment.</div>
+  <div class="banner hidden" id="dev-banner">Development environment — test data only. Nothing here is a real customer, job or payment. <a href="?env=prod">Switch to the live Hub</a></div>
 
   <!-- Signed out -->
   <section id="s-signin" class="card hidden">
@@ -328,8 +328,16 @@
 </main>
 
 <script>
-const SUPABASE_URL = 'https://ukhxlzwvqdkberucofin.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_XMAexZZfPu4m1KaDrCw8tQ_BX1iwWBx';  // publishable key: public by design
+// Two projects: production (default) and development (open the page with ?env=dev; remembered for this browser tab).
+// Publishable keys are public by design; every read and write is governed by row-level security and server functions.
+const HUB_ENVS = {
+  prod: { url: 'https://mhbslfeuzizkioceljmh.supabase.co', key: 'sb_publishable_jCwb8zAzchcbvodIFI88Hw_XOdzrren' },
+  dev:  { url: 'https://ukhxlzwvqdkberucofin.supabase.co', key: 'sb_publishable_XMAexZZfPu4m1KaDrCw8tQ_BX1iwWBx' } };
+const HUB_ENV = (() => { const q = new URLSearchParams(location.search).get('env');
+  try { if (q === 'dev' || q === 'prod') sessionStorage.setItem('hub_env', q); return sessionStorage.getItem('hub_env') || 'prod'; } catch (_) { return q === 'dev' ? 'dev' : 'prod'; } })();
+const SUPABASE_URL = HUB_ENVS[HUB_ENV].url;
+const SUPABASE_KEY = HUB_ENVS[HUB_ENV].key;
+(() => { const t = document.getElementById('env-tag'); if (t) t.textContent = HUB_ENV === 'dev' ? 'development (test data)' : ''; document.getElementById('dev-banner')?.classList.toggle('hidden', HUB_ENV !== 'dev'); })();
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'app' } });
 const $ = id => document.getElementById(id);
 const show = id => { document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden')); $(id).classList.remove('hidden'); };
