@@ -577,8 +577,10 @@ async function loadHealth() {
     $('sq-golive')?.addEventListener('click', async () => {
       const t = prompt('This links the Hub to your REAL Square. Test (sandbox) links are forgotten and cannot be chosen again.\n\nType GO LIVE to continue:');
       if (t === null) return;
-      const r = await rpc('square_go_live', { p_confirm: t });
-      alert(r.ok ? (r.already_live ? 'Already live.' : `Live. ${r.customers_queued} Hub customer(s) will be checked against your Square list in the next minute or two.`) : r.reason);
+      let r;
+      try { r = await rpc('square_go_live', { p_confirm: t }); }
+      catch (e) { alert('The switch did not go through. Send Claude this message:\n\n' + e.message); return; }
+      alert(r.ok ? (r.already_live ? 'Already live.' : `Live. ${r.customers_queued} Hub customer(s) will be checked against your Square list in the next minute or two.`) : 'Not switched: ' + r.reason);
       loadHealth();
     });
   }
