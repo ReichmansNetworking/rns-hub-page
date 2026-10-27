@@ -976,6 +976,9 @@ async function shrinkImage(file) {
 let calStart = null;
 function weekStart(d) { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 const ymd = d => d.toLocaleDateString('en-CA');
+const wxIcon = t => { t = (t || '').toLowerCase(); return /thunder|t-storm/.test(t) ? '⛈️' : /snow|flurr|sleet|ice/.test(t) ? '🌨️' : /rain|shower|drizzle/.test(t) ? '🌧️' : /fog/.test(t) ? '🌫️' : /cloud|overcast/.test(t) ? (/partly|mostly sunny/.test(t) ? '⛅' : '☁️') : /sun|clear/.test(t) ? '☀️' : '🌡️'; };
+const wxShort = w => `${wxIcon(w.text)} ${w.hi != null ? w.hi + '°' : ''}${w.lo != null ? (w.hi != null ? '/' : '') + w.lo + '°' : ''}${w.pop ? ' · ' + w.pop + '% rain' : ''}`;
+const wxLine = w => w ? `<div title="${esc((w.text || '') + (w.night ? ' — night: ' + w.night : ''))}" style="font-size:11px;color:var(--muted);margin-top:1px">${wxIcon(w.text || w.night)} ${w.hi != null ? w.hi + '°' : ''}${w.lo != null ? (w.hi != null ? ' / ' : '') + w.lo + '°' : ''}${Math.max(w.pop || 0, w.npop || 0) ? ' · ' + Math.max(w.pop || 0, w.npop || 0) + '%' : ''}<br>${esc((w.text || w.night || '').slice(0, 28))}</div>` : '';
 async function renderCalendar(targetId, openTarget) {
   if (!calStart) calStart = weekStart(new Date());
   const from = new Date(calStart), to = new Date(calStart); to.setDate(to.getDate() + 13);
@@ -983,13 +986,13 @@ async function renderCalendar(targetId, openTarget) {
   const days = [...Array(14)].map((_, i) => { const d = new Date(from); d.setDate(d.getDate() + i); return d; });
   const today = ymd(new Date());
   el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;margin:6px 0"><button class="small secondary" id="cal-prev">← 2 weeks</button><button class="small secondary" id="cal-today">This week</button><button class="small secondary" id="cal-next">2 weeks →</button>
-    <small style="color:var(--muted)">orange = in the pool · grey = time off</small></div>
+    <small style="color:var(--muted)">orange = in the pool · grey = time off${r.weather_updated ? ` · weather: National Weather Service, ${esc(r.weather_place || 'Uhrichsville area')}, updated ${et(r.weather_updated)}` : ''}</small></div>
     <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${days.map(d => { const k = ymd(d);
       const vs = r.visits.filter(v => v.date === k), off = r.time_off.filter(t => k >= t.from && k <= t.to);
       return `<div style="border:1px solid ${k === today ? 'var(--orange)' : 'var(--line)'};border-radius:6px;padding:4px;min-height:84px;font-size:12px;background:#fff">
-        <b>${d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}</b>
+        <b>${d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}</b>${wxLine((r.weather || {})[k])}
         ${off.map(t => `<div style="background:#f3f4f6;border-radius:4px;padding:2px 4px;margin-top:3px;color:var(--muted)">${esc(t.member)} off</div>`).join('')}
-        ${vs.map(v => `<a href="#" data-calv="${v.id}" data-pool="${v.pool}" style="display:block;text-decoration:none;color:inherit;background:${v.pool ? '#ffedd5' : v.status === 'done' ? '#dcfce7' : '#eef2ff'};border-radius:4px;padding:2px 4px;margin-top:3px">${fmtTime(v.time)} ${KIND[v.kind]}<br>${esc(v.customer || v.town)}${v.tech && !v.pool ? ' · ' + esc(v.tech) : ''}</a>`).join('')}</div>`; }).join('')}</div>`;
+        ${vs.map(v => `<a href="#" data-calv="${v.id}" data-pool="${v.pool}" style="display:block;text-decoration:none;color:inherit;background:${v.pool ? '#ffedd5' : v.status === 'done' ? '#dcfce7' : '#eef2ff'};border-radius:4px;padding:2px 4px;margin-top:3px">${fmtTime(v.time)} ${KIND[v.kind]}<br>${esc(v.customer || v.town)}${v.tech && !v.pool ? ' · ' + esc(v.tech) : ''}${v.wx && v.wx.place !== 'Uhrichsville area' ? `<br><span style="color:var(--muted)">${esc(v.wx.place)}: ${wxShort(v.wx)}</span>` : ''}</a>`).join('')}</div>`; }).join('')}</div>`;
   $('cal-prev').onclick = () => { calStart.setDate(calStart.getDate() - 14); renderCalendar(targetId, openTarget); };
   $('cal-next').onclick = () => { calStart.setDate(calStart.getDate() + 14); renderCalendar(targetId, openTarget); };
   $('cal-today').onclick = () => { calStart = weekStart(new Date()); renderCalendar(targetId, openTarget); };
