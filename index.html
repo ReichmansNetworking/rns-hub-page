@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RNS Hub (dev)</title>
+<title>RNS Hub</title>
 <!--
   RNS Hub R1-Lite — sign-in and bare owner screen (R1L-02, R1L-15 part). DEVELOPMENT ONLY: test data only (CP-1).
   Talks to Supabase through the publishable (public) key; every read is limited by row-level security and every
@@ -140,7 +140,7 @@
       <button data-tab="outbox" data-owner>Notices</button>
       <button data-tab="audit" data-owner>Audit log</button>
       <button data-tab="settings" data-owner>Settings</button>
-      <button data-tab="mail" data-owner>Mail log (dev)</button>
+      <button data-tab="mail" data-owner>Mail log</button>
       <button data-tab="health" data-owner>Health</button>
       <button data-signout class="secondary" style="margin-left:auto">Sign out</button>
     </div>
@@ -209,7 +209,7 @@
     </div>
 
     <div class="card hidden" id="tab-members">
-      <h2>Members</h2>
+      <h2>Members <label style="display:inline;font-size:13px;font-weight:400;margin-left:10px"><input type="checkbox" id="mem-all" style="width:auto"> show removed</label></h2>
       <table><thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Status</th><th></th></tr></thead><tbody id="members-body"></tbody></table>
       <h2 style="margin-top:20px">Invite a sales rep</h2>
       <div class="row">
@@ -220,7 +220,7 @@
       <label>Reason (recorded in the audit log)</label><input id="inv-reason" placeholder="e.g. new part-time sales rep">
       <button id="inv-go">Send invitation</button>
       <div class="msg" id="inv-msg"></div>
-      <p style="font-size:13px;color:var(--muted)">The link is valid 72 hours, single use, and bound to that email. In development the worker writes the email to the Mail log tab instead of sending it (log-only mode); copy the link from there to test acceptance.</p>
+      <p style="font-size:13px;color:var(--muted)">The invitation is emailed automatically. The link works once, for 72 hours, and only for that email address. If it expires, use "Send a new link" on the Invitations tab.</p>
     </div>
 
     <div class="card hidden" id="tab-invitations">
@@ -339,7 +339,7 @@ const HUB_ENV = (() => { const q = new URLSearchParams(location.search).get('env
   try { if (q === 'dev' || q === 'prod') sessionStorage.setItem('hub_env', q); return sessionStorage.getItem('hub_env') || 'prod'; } catch (_) { return q === 'dev' ? 'dev' : 'prod'; } })();
 const SUPABASE_URL = HUB_ENVS[HUB_ENV].url;
 const SUPABASE_KEY = HUB_ENVS[HUB_ENV].key;
-(() => { const t = document.getElementById('env-tag'); if (t) t.textContent = HUB_ENV === 'dev' ? 'development (test data)' : ''; document.getElementById('dev-banner')?.classList.toggle('hidden', HUB_ENV !== 'dev'); })();
+(() => { if (HUB_ENV === 'dev') document.title = 'RNS Hub (dev)'; const t = document.getElementById('env-tag'); if (t) t.textContent = HUB_ENV === 'dev' ? 'development (test data)' : ''; document.getElementById('dev-banner')?.classList.toggle('hidden', HUB_ENV !== 'dev'); })();
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { db: { schema: 'app' } });
 const $ = id => document.getElementById(id);
 const show = id => { document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden')); $(id).classList.remove('hidden'); };
@@ -608,8 +608,10 @@ async function loadMembers() {
   if (error) return msg('inv-msg', error.message);
   const { data: roles } = await sb.from('member_roles').select('member_id,role');
   const me = await rpc('whoami');
-  $('members-body').innerHTML = members.map(m => {
-    const rs = (roles || []).filter(r => r.member_id === m.id).map(r => r.role).join(', ');
+  const ROLE_NAME = { owner: 'Owner', sales_rep: 'Sales rep', technician: 'Technician', lead_technician: 'Lead technician' };
+  const showAll = $('mem-all') && $('mem-all').checked;
+  $('members-body').innerHTML = members.filter(m => showAll || m.status !== 'removed').map(m => {
+    const rs = (roles || []).filter(r => r.member_id === m.id).map(r => ROLE_NAME[r.role] || r.role.replace(/_/g, ' ')).join(', ');
     const self = me.member && me.member.id === m.id;
     let actions = '';
     if (!self && m.status === 'active') actions = `<button class="small secondary" data-status="suspended" data-id="${m.id}">Suspend</button>`;
@@ -624,11 +626,15 @@ async function loadMembers() {
     msg('inv-msg', r.ok ? 'Done.' : r.reason, r.ok); loadMembers();
   });
 }
+if ($('mem-all')) $('mem-all').onchange = () => loadMembers();
+const cleanEmail = v => String(v || '').trim().replace(/^mailto:/i, '').replace(/^<|>$/g, '').trim();
 $('inv-go').onclick = async () => {
   msg('inv-msg', '');
+  $('inv-email').value = cleanEmail($('inv-email').value);
+  if (!/^[^\s@<>"']+@[^\s@<>"']+\.[a-z]{2,}$/i.test($('inv-email').value)) return msg('inv-msg', 'Please enter a plain email address, like name@gmail.com.');
   try {
     const r = await rpc('invitation_create', { p_email: $('inv-email').value.trim(), p_display_name: $('inv-name').value.trim(), p_role: $('inv-role').value, p_reason: $('inv-reason').value.trim() });
-    msg('inv-msg', r.ok ? 'Invitation created and queued (expires ' + et(r.expires_at) + ').' : r.reason, r.ok);
+    msg('inv-msg', r.ok ? 'Invitation sent. The link expires ' + et(r.expires_at) + '.' : r.reason, r.ok);
     if (r.ok) { $('inv-email').value = $('inv-name').value = $('inv-reason').value = ''; loadMembers(); }
   } catch (e) { msg('inv-msg', e.message); }
 };
