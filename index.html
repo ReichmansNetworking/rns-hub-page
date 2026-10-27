@@ -564,11 +564,23 @@ async function loadHealth() {
     $('conn-summary').innerHTML = `<span class="pill">email: ${esc(ic.email_mode)}</span> `
       + yes(!!ic.email_from, 'From address' + (ic.email_from ? ' (' + esc(ic.email_from) + ')' : ''))
       + yes(ic.postmark_token_present, 'Postmark key') + yes(ic.postmark_webhook_secret_present, 'Postmark bounce hook')
-      + `<span class="pill">Square: ${esc(ic.square_mode)}</span> ` + yes(ic.square_sandbox_token_present, 'Square sandbox key')
+      + `<span class="pill ${ic.square_mode === 'live' ? 'active' : ''}">Square: ${esc(ic.square_mode)}</span> `
+      + (ic.square_mode === 'live' ? '' : yes(ic.square_sandbox_token_present, 'Square sandbox key')) + yes(ic.square_live_token_present, 'Square live key')
+      + (ic.square_mode === 'live' ? `<span class="pill">Square list: ${ic.square_customers_in_list} customers${ic.square_last_pull_done ? ', checked ' + esc(new Date(ic.square_last_pull_done).toLocaleString()) : ', not read yet'}</span> ` : '')
+      + (ic.square_needs_match ? `<span class="pill failed">${ic.square_needs_match} customer(s) waiting for your Square match decision (Customers tab)</span> ` : '')
+      + (ic.square_last_pull_error ? `<br><span class="pill failed">last Square list problem: ${esc(ic.square_last_pull_error)}</span> ` : '')
       + (ic.mail_waiting_for_answer ? `<span class="pill">${ic.mail_waiting_for_answer} email(s) waiting for Postmark</span> ` : '')
       + (ic.last_mail_error ? `<br><span class="pill failed">last email problem: ${esc(ic.last_mail_error)}</span> ` : '')
       + (ic.last_square_error ? `<br><span class="pill failed">last Square problem: ${esc(ic.last_square_error)}</span>` : '')
-      + `<p style="font-size:13px;color:var(--muted);margin-top:8px">Keys live in Supabase Vault and are never shown here. Email modes: log_only (nothing leaves the Hub), postmark_test (Postmark's test key, nothing delivered), postmark (real email). Square: off or sandbox (test money only).</p>`;
+      + `<p style="font-size:13px;color:var(--muted);margin-top:8px">Keys live in Supabase Vault and are never shown here. Email modes: log_only (nothing leaves the Hub), postmark_test (Postmark's test key, nothing delivered), postmark (real email). Square: off, sandbox (test account) or live (your real Square; switched on only with the button below).</p>`
+      + (ic.square_mode !== 'live' && ic.square_live_token_present ? `<p><button id="sq-golive">Switch to live Square</button> <small>Forgets the test links, reads your real Square customer list, then adds Hub customers. Any that may already be in Square wait for you.</small></p>` : '');
+    $('sq-golive')?.addEventListener('click', async () => {
+      const t = prompt('This links the Hub to your REAL Square. Test (sandbox) links are forgotten and cannot be chosen again.\n\nType GO LIVE to continue:');
+      if (t === null) return;
+      const r = await rpc('square_go_live', { p_confirm: t });
+      alert(r.ok ? (r.already_live ? 'Already live.' : `Live. ${r.customers_queued} Hub customer(s) will be checked against your Square list in the next minute or two.`) : r.reason);
+      loadHealth();
+    });
   }
   const bk = await rpc('backup_status');
   if (bk.ok) {
@@ -1076,15 +1088,20 @@ async function loadCustomers() {
   await loadNames();
   const { data, error } = await sb.from('customers').select('*').neq('status', 'merged').order('display_name');
   if (error) { $('cust-body').innerHTML = `<tr><td colspan="6">${esc(error.message)}</td></tr>`; return; }
-  $('cust-body').innerHTML = (data || []).map(c => `<tr><td>${esc(c.display_name)}</td><td>${esc(c.kind)}</td><td>${esc(memberNames[c.rep_member_id] || '')}</td><td><span class="pill ${c.square_state === 'in_square' ? 'active' : ['conflict','flagged_deleted','flagged_merged'].includes(c.square_state) ? 'failed' : ''}">${esc(c.square_state.replace(/_/g, ' '))}</span></td><td>${esc(c.status)}</td><td><button class="small secondary" data-cust="${c.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">No customers yet — a customer is created when a lead qualifies.</td></tr>';
+  $('cust-body').innerHTML = (data || []).map(c => `<tr><td>${esc(c.display_name)}</td><td>${esc(c.kind)}</td><td>${esc(memberNames[c.rep_member_id] || '')}</td><td><span class="pill ${c.square_state === 'in_square' ? 'active' : ['conflict','flagged_deleted','flagged_merged','match_review'].includes(c.square_state) ? 'failed' : ''}">${esc(c.square_state === 'match_review' ? 'waiting for you: already in Square?' : c.square_state.replace(/_/g, ' '))}</span></td><td>${esc(c.status)}</td><td><button class="small secondary" data-cust="${c.id}">Open</button></td></tr>`).join('') || '<tr><td colspan="6">No customers yet — a customer is created when a lead qualifies.</td></tr>';
   $('cust-body').querySelectorAll('button[data-cust]').forEach(b => b.onclick = () => openCustomer(b.dataset.cust));
   if (window.__me.is_owner) {
     const w = await rpc('square_watch');
     const { data: dups } = await sb.from('duplicate_candidates').select('*').eq('status', 'open');
     const name = id => (data || []).find(c => c.id === id)?.display_name || id.slice(0, 8);
-    $('cust-owner').innerHTML = `<p><span class="pill">Square mode: ${esc(w.mode)}</span> <span class="pill">${w.not_yet_in_square.length} not yet in Square</span> <span class="pill ${w.conflicts.length ? 'failed' : ''}">${w.conflicts.length} conflict/flagged</span> <span class="pill">queue: ${w.queue.queued} queued, ${w.queue.failed} failed</span></p>`
+    const ml = w.needs_match ? await rpc('square_match_list') : { held: [] };
+    const fmtC = k => [k.name, k.company, k.email, k.phone].filter(Boolean).map(esc).join(' · ');
+    const matchHtml = (ml.held || []).length ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Already in Square? Nothing goes to Square until you choose.</strong>${ml.held.map(h => `<div style="margin:8px 0;padding-top:8px;border-top:1px solid #eee"><p><strong>Hub:</strong> ${esc(h.name)} ${esc(h.phone || '')} ${esc(h.email || '')}</p>${h.candidates.map(k => `<p style="margin-left:12px"><strong>Square:</strong> ${fmtC(k)} <span class="pill">${esc(k.why)}</span> <button class="small" data-sqlink="${h.queue_id}|${esc(k.square_customer_id)}">Same customer: link</button></p>`).join('')}<p style="margin-left:12px"><button class="small secondary" data-sqnew="${h.queue_id}">None of these: add as a new Square customer</button></p></div>`).join('')}</div>` : '';
+    $('cust-owner').innerHTML = matchHtml + `<p><span class="pill">Square mode: ${esc(w.mode)}</span> <span class="pill">${w.not_yet_in_square.length} not yet in Square</span> <span class="pill ${w.conflicts.length ? 'failed' : ''}">${w.conflicts.length} conflict/flagged</span> <span class="pill">queue: ${w.queue.queued} queued, ${w.queue.failed} failed</span></p>`
       + ((dups || []).length ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Possible duplicates</strong>${dups.map(d => `<p>${esc(name(d.customer_a))} ↔ ${esc(name(d.customer_b))} (${esc(d.why)}) <button class="small secondary" data-merge="${d.customer_a}|${d.customer_b}">Merge into first</button> <button class="small secondary" data-merge="${d.customer_b}|${d.customer_a}">Merge into second</button> <button class="small secondary" data-dismiss="${d.id}">Not a duplicate</button></p>`).join('')}</div>` : '');
     $('cust-owner').querySelectorAll('button[data-merge]').forEach(b => b.onclick = async () => { const [k, d] = b.dataset.merge.split('|'); const reason = prompt('Reason for merging:'); if (!reason) return; const r = await rpc('customer_merge', { p_keep: k, p_drop: d, p_reason: reason }); if (!r.ok) alert(r.reason); loadCustomers(); });
+    $('cust-owner').querySelectorAll('button[data-sqlink]').forEach(b => b.onclick = async () => { const [q, id] = b.dataset.sqlink.split('|'); const r = await rpc('square_match_decide', { p_queue: +q, p_square_customer_id: id }); if (!r.ok) alert(r.reason); loadCustomers(); });
+    $('cust-owner').querySelectorAll('button[data-sqnew]').forEach(b => b.onclick = async () => { if (!confirm('Add this customer to Square as a NEW customer?')) return; const r = await rpc('square_match_decide', { p_queue: +b.dataset.sqnew, p_square_customer_id: null }); if (!r.ok) alert(r.reason); loadCustomers(); });
     $('cust-owner').querySelectorAll('button[data-dismiss]').forEach(b => b.onclick = async () => { const r = await rpc('duplicate_dismiss', { p_id: +b.dataset.dismiss, p_reason: prompt('Reason:') || 'not a duplicate' }); if (!r.ok) alert(r.reason); loadCustomers(); });
   }
 }
