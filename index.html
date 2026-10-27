@@ -1099,13 +1099,47 @@ async function loadCustomers() {
     const ml = w.needs_match ? await rpc('square_match_list') : { held: [] };
     const fmtC = k => [k.name, k.company, k.email, k.phone].filter(Boolean).map(esc).join(' · ');
     const matchHtml = (ml.held || []).length ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Already in Square? Nothing goes to Square until you choose.</strong>${ml.held.map(h => `<div style="margin:8px 0;padding-top:8px;border-top:1px solid #eee"><p><strong>Hub:</strong> ${esc(h.name)} ${esc(h.phone || '')} ${esc(h.email || '')}</p>${h.candidates.map(k => `<p style="margin-left:12px"><strong>Square:</strong> ${fmtC(k)} <span class="pill">${esc(k.why)}</span> <button class="small" data-sqlink="${h.queue_id}|${esc(k.square_customer_id)}">Same customer: link</button></p>`).join('')}<p style="margin-left:12px"><button class="small secondary" data-sqnew="${h.queue_id}">None of these: add as a new Square customer</button></p></div>`).join('')}</div>` : '';
-    $('cust-owner').innerHTML = matchHtml + `<p><span class="pill">Square mode: ${esc(w.mode)}</span> <span class="pill">${w.not_yet_in_square.length} not yet in Square</span> <span class="pill ${w.conflicts.length ? 'failed' : ''}">${w.conflicts.length} conflict/flagged</span> <span class="pill">queue: ${w.queue.queued} queued, ${w.queue.failed} failed</span></p>`
+    const importBtn = w.mode === 'live' ? `<p><button id="sq-import-open" class="secondary">Bring in Square customers</button> <small>Adds your existing Square customers to the Hub, linked to Square (nothing in Square changes). They come in as yours; assign reps later.</small></p><div id="sq-import"></div>` : '';
+    $('cust-owner').innerHTML = matchHtml + importBtn + `<p><span class="pill">Square mode: ${esc(w.mode)}</span> <span class="pill">${w.not_yet_in_square.length} not yet in Square</span> <span class="pill ${w.conflicts.length ? 'failed' : ''}">${w.conflicts.length} conflict/flagged</span> <span class="pill">queue: ${w.queue.queued} queued, ${w.queue.failed} failed</span></p>`
       + ((dups || []).length ? `<div class="banner" style="background:#fff;border-color:#fed7aa"><strong>Possible duplicates</strong>${dups.map(d => `<p>${esc(name(d.customer_a))} ↔ ${esc(name(d.customer_b))} (${esc(d.why)}) <button class="small secondary" data-merge="${d.customer_a}|${d.customer_b}">Merge into first</button> <button class="small secondary" data-merge="${d.customer_b}|${d.customer_a}">Merge into second</button> <button class="small secondary" data-dismiss="${d.id}">Not a duplicate</button></p>`).join('')}</div>` : '');
     $('cust-owner').querySelectorAll('button[data-merge]').forEach(b => b.onclick = async () => { const [k, d] = b.dataset.merge.split('|'); const reason = prompt('Reason for merging:'); if (!reason) return; const r = await rpc('customer_merge', { p_keep: k, p_drop: d, p_reason: reason }); if (!r.ok) alert(r.reason); loadCustomers(); });
+    $('sq-import-open')?.addEventListener('click', () => openSquareImport());
     $('cust-owner').querySelectorAll('button[data-sqlink]').forEach(b => b.onclick = async () => { const [q, id] = b.dataset.sqlink.split('|'); const r = await rpc('square_match_decide', { p_queue: +q, p_square_customer_id: id }); if (!r.ok) alert(r.reason); loadCustomers(); });
     $('cust-owner').querySelectorAll('button[data-sqnew]').forEach(b => b.onclick = async () => { if (!confirm('Add this customer to Square as a NEW customer?')) return; const r = await rpc('square_match_decide', { p_queue: +b.dataset.sqnew, p_square_customer_id: null }); if (!r.ok) alert(r.reason); loadCustomers(); });
     $('cust-owner').querySelectorAll('button[data-dismiss]').forEach(b => b.onclick = async () => { const r = await rpc('duplicate_dismiss', { p_id: +b.dataset.dismiss, p_reason: prompt('Reason:') || 'not a duplicate' }); if (!r.ok) alert(r.reason); loadCustomers(); });
   }
+}
+async function openSquareImport() {
+  const box = $('sq-import'); const started = Date.now();
+  box.innerHTML = '<p>Reading your Square customer list (about a minute)…</p>';
+  try { await rpc('square_pull_now'); } catch (e) { box.innerHTML = `<p class="pill failed">${esc(e.message)}</p>`; return; }
+  let v = null;
+  for (let i = 0; i < 18; i++) {
+    await new Promise(r => setTimeout(r, 10000));
+    v = await rpc('square_import_list').catch(e => ({ ok: false, reason: e.message }));
+    if (!v.ok) { box.innerHTML = `<p class="pill failed">${esc(v.reason)}</p>`; return; }
+    if (v.list_checked && new Date(v.list_checked).getTime() >= started - 5000) break;
+    box.innerHTML = `<p>Reading your Square customer list… (${(i + 1) * 10}s)</p>`;
+  }
+  if (!v || !v.list_checked || new Date(v.list_checked).getTime() < started - 5000) { box.innerHTML = '<p class="pill failed">Square did not answer in 3 minutes. Check Health → Connections for a Square list problem, then try again.</p>'; return; }
+  const cs = v.customers || [];
+  if (!cs.length) { box.innerHTML = '<p>Every Square customer is already in the Hub.</p>'; return; }
+  box.innerHTML = `<div class="banner" style="background:#fff;border-color:#fed7aa"><p><strong>${cs.length} Square customer(s) not in the Hub yet.</strong> Ticked ones will be added. Suggested skips are unticked; tick them if you want them anyway.</p>
+    <p><label><input type="checkbox" id="sqi-all"> tick all</label></p>
+    <table><thead><tr><th></th><th>Name</th><th>Contact</th><th>Town</th><th>In Square since</th><th>Note</th></tr></thead><tbody>${cs.map(c => `<tr><td><input type="checkbox" data-sqi="${esc(c.square_customer_id)}" ${c.skip_reason ? '' : 'checked'}></td><td>${esc(c.name)}${c.company && c.person ? '<br><small>' + esc(c.person) + '</small>' : ''}</td><td>${esc(c.phone || '')}<br><small>${esc(c.email || '')}</small></td><td>${esc(c.town)}</td><td>${esc(c.created || '')}</td><td>${c.skip_reason ? `<span class="pill failed">skip? ${esc(c.skip_reason)}</span> ` : ''}${c.note ? `<span class="pill">${esc(c.note)}</span>` : ''}</td></tr>`).join('')}</tbody></table>
+    <p><button id="sqi-go">Add ticked customers to the Hub</button> <span id="sqi-msg"></span></p></div>`;
+  const count = () => { $('sqi-go').textContent = `Add ${box.querySelectorAll('input[data-sqi]:checked').length} ticked customer(s) to the Hub`; };
+  box.querySelectorAll('input[data-sqi]').forEach(x => x.onchange = count); count();
+  $('sqi-all').onchange = e => { box.querySelectorAll('input[data-sqi]').forEach(x => x.checked = e.target.checked); count(); };
+  $('sqi-go').onclick = async () => {
+    const ids = [...box.querySelectorAll('input[data-sqi]:checked')].map(x => x.dataset.sqi);
+    if (!ids.length) return;
+    if (!confirm(`Add ${ids.length} Square customer(s) to the Hub as your customers? Nothing in Square changes.`)) return;
+    $('sqi-go').disabled = true;
+    try { const r = await rpc('square_import', { p_ids: ids }); alert(r.ok ? `Added ${r.imported} customer(s).` + (r.skipped.length ? ` Skipped ${r.skipped.length}: ` + r.skipped.map(k => k.why).join(', ') : '') : r.reason); }
+    catch (e) { alert('Not added: ' + e.message); }
+    loadCustomers();
+  };
 }
 async function openCustomer(id) {
   const { data: c } = await sb.from('customers').select('*').eq('id', id).single();
