@@ -306,6 +306,8 @@
       <div id="health-summary"></div>
       <h2 style="margin-top:20px">Latest measurements</h2>
       <table><thead><tr><th>Metric</th><th>Value</th><th>Limit</th></tr></thead><tbody id="health-body"></tbody></table>
+      <h2 style="margin-top:20px">Connections</h2>
+      <div id="conn-summary"></div>
       <h2 style="margin-top:20px">Backups</h2>
       <div id="backup-summary"></div>
       <h2 style="margin-top:20px">Recent checks</h2>
@@ -317,7 +319,7 @@
       <h2>Settings</h2>
       <table><thead><tr><th>Key</th><th>Value</th><th>Updated</th></tr></thead><tbody id="settings-body"></tbody></table>
       <div class="row">
-        <div><label>Key</label><select id="set-key"><option>owner_email</option><option>dedicated_inbox_email</option><option>business_hours</option><option>email_mode</option><option>hub_url</option><option>budget_monthly_usd</option><option>spend_month_to_date_usd</option><option>square_mode</option><option>internal_labor_cost_cents_per_person_hour</option><option>warranty_allowance_pct</option><option>mileage_rate_cents</option><option>commission_rate_pct_default</option><option>processing_fee_pct</option><option>margin_min_pct</option></select></div>
+        <div><label>Key</label><select id="set-key"><option>owner_email</option><option>dedicated_inbox_email</option><option>business_hours</option><option>email_mode</option><option>email_from</option><option>email_reply_to</option><option>hub_url</option><option>budget_monthly_usd</option><option>spend_month_to_date_usd</option><option>square_mode</option><option>internal_labor_cost_cents_per_person_hour</option><option>warranty_allowance_pct</option><option>mileage_rate_cents</option><option>commission_rate_pct_default</option><option>processing_fee_pct</option><option>margin_min_pct</option></select></div>
         <div><label>Value (JSON: "text" in quotes, or null)</label><input id="set-value" placeholder='"owner@example.com"'></div>
       </div>
       <label>Reason</label><input id="set-reason">
@@ -556,6 +558,18 @@ async function loadHealth() {
   if (it.ok) $('health-summary').insertAdjacentHTML('beforeend', `<br><span class="pill">lead intake today: ${it.today_accepted} / ${it.daily_limit}</span> `
     + Object.entries(it.last7).map(([k, v]) => `<span class="pill ${k === 'rate_limited' || k === 'held' ? 'failed' : ''}">7 days ${esc(k.replace('_', ' '))}: ${v}</span> `).join('')
     + `<span class="pill ${it.pool_escalated ? 'failed' : ''}">pool: ${it.pool_open} open, ${it.pool_escalated} overdue</span>`);
+  const ic = await rpc('integration_status').catch(() => null);
+  if (ic && ic.email_mode !== undefined) {
+    const yes = (b, t) => `<span class="pill ${b ? 'active' : ''}">${t}: ${b ? 'ready' : 'not set'}</span> `;
+    $('conn-summary').innerHTML = `<span class="pill">email: ${esc(ic.email_mode)}</span> `
+      + yes(!!ic.email_from, 'From address' + (ic.email_from ? ' (' + esc(ic.email_from) + ')' : ''))
+      + yes(ic.postmark_token_present, 'Postmark key') + yes(ic.postmark_webhook_secret_present, 'Postmark bounce hook')
+      + `<span class="pill">Square: ${esc(ic.square_mode)}</span> ` + yes(ic.square_sandbox_token_present, 'Square sandbox key')
+      + (ic.mail_waiting_for_answer ? `<span class="pill">${ic.mail_waiting_for_answer} email(s) waiting for Postmark</span> ` : '')
+      + (ic.last_mail_error ? `<br><span class="pill failed">last email problem: ${esc(ic.last_mail_error)}</span> ` : '')
+      + (ic.last_square_error ? `<br><span class="pill failed">last Square problem: ${esc(ic.last_square_error)}</span>` : '')
+      + `<p style="font-size:13px;color:var(--muted);margin-top:8px">Keys live in Supabase Vault and are never shown here. Email modes: log_only (nothing leaves the Hub), postmark_test (Postmark's test key, nothing delivered), postmark (real email). Square: off or sandbox (test money only).</p>`;
+  }
   const bk = await rpc('backup_status');
   if (bk.ok) {
     const ls = bk.last_success, lf = bk.last_failure, lr = bk.last_restore_test;
