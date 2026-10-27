@@ -978,23 +978,32 @@ function weekStart(d) { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDat
 const ymd = d => d.toLocaleDateString('en-CA');
 const wxIcon = t => { t = (t || '').toLowerCase(); return /thunder|t-storm/.test(t) ? '⛈️' : /snow|flurr|sleet|ice/.test(t) ? '🌨️' : /rain|shower|drizzle/.test(t) ? '🌧️' : /fog/.test(t) ? '🌫️' : /cloud|overcast/.test(t) ? (/partly|mostly sunny/.test(t) ? '⛅' : '☁️') : /sun|clear/.test(t) ? '☀️' : '🌡️'; };
 const wxShort = w => `${wxIcon(w.text)} ${w.hi != null ? w.hi + '°' : ''}${w.lo != null ? (w.hi != null ? '/' : '') + w.lo + '°' : ''}${w.pop ? ' · ' + w.pop + '% rain' : ''}`;
-const wxLine = w => w ? `<div title="${esc((w.text || '') + (w.night ? ' — night: ' + w.night : ''))}" style="font-size:11px;color:var(--muted);margin-top:1px">${wxIcon(w.text || w.night)} ${w.hi != null ? w.hi + '°' : ''}${w.lo != null ? (w.hi != null ? ' / ' : '') + w.lo + '°' : ''}${Math.max(w.pop || 0, w.npop || 0) ? ' · ' + Math.max(w.pop || 0, w.npop || 0) + '%' : ''}<br>${esc((w.text || w.night || '').slice(0, 28))}</div>` : '';
+const wxLine = w => {
+  if (!w) return '';
+  if (w.kind === 'typical') return `<div title="Normal high/low for this date (1991–2020, New Philadelphia). Not a forecast." style="font-size:11px;color:#9ca3af;margin-top:1px">typical ${w.hi}° / ${w.lo}°</div>`;
+  const tip = (w.kind === 'outlook' ? 'Longer-range outlook (MET Norway), less certain. ' : '') + (w.text || '') + (w.night ? ' — night: ' + w.night : '');
+  return `<div title="${esc(tip)}" style="font-size:11px;color:var(--muted);margin-top:1px;${w.kind === 'outlook' ? 'font-style:italic' : ''}">${wxIcon(w.text || w.night)} ${w.kind === 'outlook' ? '~' : ''}${w.hi != null ? w.hi + '°' : ''}${w.lo != null ? (w.hi != null ? ' / ' : '') + w.lo + '°' : ''}${Math.max(w.pop || 0, w.npop || 0) ? ' · ' + Math.max(w.pop || 0, w.npop || 0) + '%' : ''}<br>${esc((w.text || w.night || '').slice(0, 28))}${w.kind === 'outlook' ? ' (outlook)' : ''}</div>`;
+};
+let calSpan = 14;
 async function renderCalendar(targetId, openTarget) {
   if (!calStart) calStart = weekStart(new Date());
-  const from = new Date(calStart), to = new Date(calStart); to.setDate(to.getDate() + 13);
+  const from = new Date(calStart), to = new Date(calStart); to.setDate(to.getDate() + calSpan - 1);
   const r = await rpc('calendar', { p_from: ymd(from), p_to: ymd(to) }); const el = $(targetId); if (!r.ok) { el.innerHTML = esc(r.reason); return; }
-  const days = [...Array(14)].map((_, i) => { const d = new Date(from); d.setDate(d.getDate() + i); return d; });
+  const days = [...Array(calSpan)].map((_, i) => { const d = new Date(from); d.setDate(d.getDate() + i); return d; });
   const today = ymd(new Date());
-  el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;margin:6px 0"><button class="small secondary" id="cal-prev">← 2 weeks</button><button class="small secondary" id="cal-today">This week</button><button class="small secondary" id="cal-next">2 weeks →</button>
-    <small style="color:var(--muted)">orange = in the pool · grey = time off${r.weather_updated ? ` · weather: National Weather Service, ${esc(r.weather_place || 'Uhrichsville area')}, updated ${et(r.weather_updated)}` : ''}</small></div>
+  el.innerHTML = `<div style="display:flex;gap:6px;align-items:center;margin:6px 0"><button class="small secondary" id="cal-prev">← back</button><button class="small secondary" id="cal-today">This week</button><button class="small secondary" id="cal-next">next →</button>
+    <button class="small ${calSpan === 14 ? '' : 'secondary'}" id="cal-2w">2 weeks</button><button class="small ${calSpan === 35 ? '' : 'secondary'}" id="cal-mo">Month</button>
+    <small style="color:var(--muted)">orange = in the pool · grey = time off${r.weather_updated ? ` · weather: National Weather Service (7 days), then MET Norway outlook (~ italic), then typical for the date · ${esc(r.weather_place || 'Uhrichsville area')}, updated ${et(r.weather_updated)}` : ''}</small></div>
     <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">${days.map(d => { const k = ymd(d);
       const vs = r.visits.filter(v => v.date === k), off = r.time_off.filter(t => k >= t.from && k <= t.to);
       return `<div style="border:1px solid ${k === today ? 'var(--orange)' : 'var(--line)'};border-radius:6px;padding:4px;min-height:84px;font-size:12px;background:#fff">
         <b>${d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })}</b>${wxLine((r.weather || {})[k])}
         ${off.map(t => `<div style="background:#f3f4f6;border-radius:4px;padding:2px 4px;margin-top:3px;color:var(--muted)">${esc(t.member)} off</div>`).join('')}
         ${vs.map(v => `<a href="#" data-calv="${v.id}" data-pool="${v.pool}" style="display:block;text-decoration:none;color:inherit;background:${v.pool ? '#ffedd5' : v.status === 'done' ? '#dcfce7' : '#eef2ff'};border-radius:4px;padding:2px 4px;margin-top:3px">${fmtTime(v.time)} ${KIND[v.kind]}<br>${esc(v.customer || v.town)}${v.tech && !v.pool ? ' · ' + esc(v.tech) : ''}${v.wx && v.wx.place !== 'Uhrichsville area' ? `<br><span style="color:var(--muted)">${esc(v.wx.place)}: ${wxShort(v.wx)}</span>` : ''}</a>`).join('')}</div>`; }).join('')}</div>`;
-  $('cal-prev').onclick = () => { calStart.setDate(calStart.getDate() - 14); renderCalendar(targetId, openTarget); };
-  $('cal-next').onclick = () => { calStart.setDate(calStart.getDate() + 14); renderCalendar(targetId, openTarget); };
+  $('cal-prev').onclick = () => { calStart.setDate(calStart.getDate() - calSpan); renderCalendar(targetId, openTarget); };
+  $('cal-next').onclick = () => { calStart.setDate(calStart.getDate() + calSpan); renderCalendar(targetId, openTarget); };
+  $('cal-2w').onclick = () => { calSpan = 14; renderCalendar(targetId, openTarget); };
+  $('cal-mo').onclick = () => { calSpan = 35; renderCalendar(targetId, openTarget); };
   $('cal-today').onclick = () => { calStart = weekStart(new Date()); renderCalendar(targetId, openTarget); };
   el.querySelectorAll('[data-calv]').forEach(a => a.onclick = e => { e.preventDefault(); if (a.dataset.pool === 'true' && !window.__me.is_owner) return; openVisit(a.dataset.calv, openTarget); });
 }
